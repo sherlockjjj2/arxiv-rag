@@ -707,7 +707,7 @@ def evaluate(eval_set: list[dict]) -> dict:
 
 ## 10. Project Phases
 
-### Phase 1: Data Pipeline (Days 1-2)
+### Phase 1: Data Pipeline (Days 1)
 
 **Goal**: 50 papers indexed and queryable via BM25
 
@@ -720,7 +720,7 @@ def evaluate(eval_set: list[dict]) -> dict:
 
 **Deliverable**: Can run `arxiv-rag query "dense retrieval"` and get text chunks back
 
-### Phase 2: Vector Search (Days 3-4)
+### Phase 2: Vector Search (Days 2)
 
 **Goal**: Hybrid retrieval working
 
@@ -731,7 +731,7 @@ def evaluate(eval_set: list[dict]) -> dict:
 
 **Deliverable**: `arxiv-rag sources "How does FAISS work?"` returns relevant chunks from both indexes
 
-### Phase 3: Generation + Citations (Days 5-6)
+### Phase 3: Generation + Citations (Days 3)
 
 **Goal**: End-to-end query → cited answer
 
@@ -742,7 +742,7 @@ def evaluate(eval_set: list[dict]) -> dict:
 
 **Deliverable**: Full answers with `[arXiv:ID p.N]` citations and supporting quotes
 
-### Phase 4: Evaluation (Days 7-8)
+### Phase 4: Evaluation (Days 4)
 
 **Goal**: Know how good/bad your system is
 
@@ -754,7 +754,7 @@ def evaluate(eval_set: list[dict]) -> dict:
 
 **Deliverable**: Eval report showing Recall@5, MRR, citation accuracy
 
-### Phase 5: Polish + Scale (Days 9-10)
+### Phase 5: Polish + Scale (Days 5)
 
 **Goal**: 200 papers, robust CLI
 
