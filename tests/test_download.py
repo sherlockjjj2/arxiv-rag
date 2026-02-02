@@ -113,3 +113,44 @@ def test_sync_rebuilds_index(tmp_path, monkeypatch):
 
     assert existing == {"2311.12022"}
     assert download.ID_INDEX.read_text(encoding="utf-8").strip() == "2311.12022"
+
+
+def test_download_pdf_closes_response(tmp_path, monkeypatch):
+    download = _load_download_module()
+    dest_path = tmp_path / "paper.pdf"
+
+    class FakeResponse:
+        status_code = 200
+        headers = {}
+
+        def __init__(self):
+            self.closed = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, _exc_type, _exc, _tb):
+            self.close()
+
+        def close(self):
+            self.closed = True
+
+        def raise_for_status(self):
+            return None
+
+        def iter_content(self, chunk_size=1024):
+            yield b"pdf"
+
+    response = FakeResponse()
+
+    def fake_get(*_args, **_kwargs):
+        return response
+
+    monkeypatch.setattr(download.requests, "get", fake_get)
+
+    class FakeResult:
+        pdf_url = "http://example.com/paper.pdf"
+
+    assert download._download_pdf(FakeResult(), dest_path, timeout=1) is None
+    assert response.closed is True
+    assert dest_path.exists()

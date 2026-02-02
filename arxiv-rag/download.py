@@ -66,11 +66,9 @@ def _write_id_index(existing: Set[str]) -> None:
 
 
 def _base_id_from_versioned(versioned_id: str) -> str:
-    match = _VERSIONED_NEW_ID_RE.match(versioned_id)
-    if match:
+    if match := _VERSIONED_NEW_ID_RE.match(versioned_id):
         return match.group("base")
-    match = _VERSIONED_OLD_ID_RE.match(versioned_id)
-    if match:
+    if match := _VERSIONED_OLD_ID_RE.match(versioned_id):
         return match.group("base")
     return versioned_id
 
@@ -80,8 +78,7 @@ def _is_valid_base_id(base_id: str) -> bool:
 
 
 def _validate_base_ids(ids: Iterable[str]) -> List[str]:
-    invalid = [base_id for base_id in ids if not _is_valid_base_id(base_id)]
-    return invalid
+    return [base_id for base_id in ids if not _is_valid_base_id(base_id)]
 
 
 def _get_client() -> arxiv.Client:
@@ -131,49 +128,102 @@ def _download_pdf(
     delay_seconds: Optional[int] = None,
 ) -> Optional[int]:
     headers = {"User-Agent": _USER_AGENT}
-    response = requests.get(
+    with requests.get(
         result.pdf_url,
         stream=True,
         timeout=timeout,
         headers=headers,
-    )
-    if response.status_code == 429:
-        retry_after = response.headers.get("Retry-After")
-        if retry_after and retry_after.isdigit():
-            response.close()
-            return int(retry_after)
-        response.close()
-        return delay_seconds
-    response.raise_for_status()
-    tmp_path = dest_path.with_suffix(dest_path.suffix + ".part")
-    try:
-        with tmp_path.open("wb") as handle:
-            for chunk in response.iter_content(chunk_size=1024 * 1024):
-                if chunk:
-                    handle.write(chunk)
-        os.replace(tmp_path, dest_path)
-    finally:
-        if tmp_path.exists():
-            tmp_path.unlink(missing_ok=True)
-    return None
+    ) as response:
+        if response.status_code == 429:
+            return (
+                int(retry_after)
+                if (retry_after := response.headers.get("Retry-After"))
+                and retry_after.isdigit()
+                else (delay_seconds or 1)
+            )
+        response.raise_for_status()
+        tmp_path = dest_path.with_suffix(f"{dest_path.suffix}.part")
+        try:
+            with tmp_path.open("wb") as handle:
+                for chunk in response.iter_content(chunk_size=1024 * 1024):
+                    if chunk:
+                        handle.write(chunk)
+            os.replace(tmp_path, dest_path)
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink(missing_ok=True)
+        return None
+
+
+def _should_sync_id_index() -> bool:
+    if not ID_INDEX.exists():
+        return True
+    if not PDF_DIR.exists():
+        return False
+    if ID_INDEX.stat().st_size == 0:
+        return any(PDF_DIR.glob("*.pdf"))
+    index_mtime = ID_INDEX.stat().st_mtime
+    for pdf_path in PDF_DIR.glob("*.pdf"):
+        if pdf_path.stat().st_mtime >= index_mtime:
+            return True
+    return False
+
+
+def _dedupe_ids(ids: Iterable[str]) -> List[str]:
+    unique_ids: List[str] = []
+    seen: Set[str] = set()
+    for base_id in ids:
+        if base_id in seen:
+            continue
+        seen.add(base_id)
+        unique_ids.append(base_id)
+    return unique_ids
+
+
+def _report_invalid_ids(invalid_ids: Iterable[str]) -> None:
+    for base_id in invalid_ids:
+        print(f"Error: invalid arXiv ID format: {base_id}", file=sys.stderr)
+
+
+def _attempt_download(
+    base_id: str,
+    result: arxiv.Result,
+    dest_path: Path,
+    retries: int,
+    timeout: int,
+) -> Optional[str]:
+    for attempt in range(retries):
+        try:
+            retry_after = _download_pdf(
+                result,
+                dest_path,
+                timeout,
+                delay_seconds=2 ** attempt,
+            )
+            if retry_after is not None:
+                if attempt == retries - 1:
+                    raise RuntimeError("rate limited by arXiv")
+                time.sleep(retry_after)
+                continue
+            return None
+        except Exception as exc:  # noqa: BLE001
+            if dest_path.exists():
+                dest_path.unlink(missing_ok=True)
+            if attempt == retries - 1:
+                return f"failed to download {base_id} after {retries} attempts: {exc}"
+            time.sleep(2 ** attempt)
+    return f"failed to download {base_id} after {retries} attempts"
 
 
 def _download_by_id(ids: List[str], retries: int, timeout: int) -> int:
     _ensure_paths()
     existing_ids = _load_id_index()
-    _sync_id_index(existing_ids)
+    if _should_sync_id_index():
+        _sync_id_index(existing_ids)
 
-    unique_ids: List[str] = []
-    seen: Set[str] = set()
-    for base_id in ids:
-        if base_id not in seen:
-            seen.add(base_id)
-            unique_ids.append(base_id)
-
-    invalid_ids = _validate_base_ids(unique_ids)
-    if invalid_ids:
-        for base_id in invalid_ids:
-            print(f"Error: invalid arXiv ID format: {base_id}", file=sys.stderr)
+    unique_ids = _dedupe_ids(ids)
+    if invalid_ids := _validate_base_ids(unique_ids):
+        _report_invalid_ids(invalid_ids)
         return 1
 
     pending_ids = [base_id for base_id in unique_ids if base_id not in existing_ids]
@@ -188,54 +238,24 @@ def _download_by_id(ids: List[str], retries: int, timeout: int) -> int:
     for base_id in unique_ids:
         if base_id in existing_ids:
             print(f"Skipped {base_id}: already downloaded.")
-            continue
-
-        result = results.get(base_id)
-        if result is None:
+        elif (result := results.get(base_id)) is None:
             print(f"Error: no metadata found for {base_id}.", file=sys.stderr)
             failures.append(base_id)
-            continue
-
-        short_id = result.get_short_id()
-        if not result.pdf_url:
+        elif not result.pdf_url:
             print(f"Error: no PDF available for {base_id}.", file=sys.stderr)
             failures.append(base_id)
-            continue
-
-        dest_path = PDF_DIR / f"{short_id}.pdf"
-        if dest_path.exists():
-            print(f"Skipped {base_id}: PDF exists.")
-            existing_ids.add(base_id)
-            continue
-
-        for attempt in range(retries):
-            try:
-                backoff_seconds = 2 ** attempt
-                retry_after = _download_pdf(
-                    result,
-                    dest_path,
-                    timeout,
-                    delay_seconds=backoff_seconds,
-                )
-                if retry_after is not None:
-                    if attempt == retries - 1:
-                        raise RuntimeError("rate limited by arXiv")
-                    time.sleep(retry_after)
-                    continue
+        else:
+            short_id = result.get_short_id()
+            dest_path = PDF_DIR / f"{short_id}.pdf"
+            if dest_path.exists():
+                print(f"Skipped {base_id}: PDF exists.")
+                existing_ids.add(base_id)
+            elif (error := _attempt_download(base_id, result, dest_path, retries, timeout)):
+                print(f"Error: {error}", file=sys.stderr)
+                failures.append(base_id)
+            else:
                 existing_ids.add(base_id)
                 print(f"Downloaded {base_id} -> {dest_path}")
-                break
-            except Exception as exc:  # noqa: BLE001
-                if dest_path.exists():
-                    dest_path.unlink(missing_ok=True)
-                if attempt == retries - 1:
-                    print(
-                        f"Error: failed to download {base_id} after {retries} attempts: {exc}",
-                        file=sys.stderr,
-                    )
-                    failures.append(base_id)
-                else:
-                    time.sleep(2 ** attempt)
 
     _write_id_index(existing_ids)
     return 1 if failures else 0
@@ -279,9 +299,7 @@ def main() -> int:
     args = _parse_args()
     if args.query:
         return _search(args.query, args.max_results, args.sort)
-    if args.ids:
-        return _download_by_id(args.ids, args.retries, args.timeout)
-    return 2
+    return _download_by_id(args.ids, args.retries, args.timeout) if args.ids else 2
 
 
 if __name__ == "__main__":
