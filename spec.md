@@ -229,6 +229,31 @@ def extract_pages(pdf_path: str) -> list[dict]:
     return pages
 ```
 
+#### Current parse flow (implemented)
+
+```
+PDF path
+  │
+  ├─ validate exists/is_file
+  ├─ compute doc_id = sha1(file bytes)
+  ├─ open PDF with PyMuPDF
+  ├─ for each page:
+  │    ├─ page.get_text("text")
+  │    ├─ clean text (join hyphen breaks, normalize whitespace, drop empty lines)
+  │    └─ on error: warn + skip page
+  ├─ optional: remove repeated headers/footers
+  │    ├─ collect first/last line per page (post-clean)
+  │    └─ remove lines repeating on >=60% of pages and <=120 chars
+  └─ emit JSON: doc_id, pdf_path, num_pages, pages[{page, text}]
+```
+
+## Design decisions\*\*
+
+- Stable IDs via SHA1 of file bytes (path-independent).
+- Per-page error isolation; parsing continues even if a page fails.
+- Text-layer only; no OCR, no chunking.
+- Header/footer removal is optional to avoid dropping real section headers.
+
 ### 5.2 Chunking Strategy
 
 ```python

@@ -44,6 +44,18 @@ Backfill metadata for existing PDFs:
 uv run python arxiv-rag/download.py --backfill-db
 ```
 
+Parse a PDF (text layer only, defaults to `data/parsed/<pdf_stem>.json`):
+
+```bash
+uv run python arxiv-rag/parse.py --pdf data/arxiv-papers/2505.09388v1.pdf
+```
+
+Optional header/footer removal:
+
+```bash
+uv run python arxiv-rag/parse.py --pdf data/arxiv-papers/2505.09388v1.pdf --remove-headers-footers
+```
+
 ## Testing
 
 ```bash
