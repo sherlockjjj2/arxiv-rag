@@ -81,10 +81,10 @@ def test_download_by_id_downloads_and_records(tmp_path, capsys, monkeypatch):
         def get_short_id():
             return "2311.12022v2"
 
-    def fake_fetch_results(_ids):
+    def fake_fetch_results(_ids, **_kwargs):
         return {"2311.12022": FakeResult()}
 
-    def fake_download_pdf(_result, dest_path, _timeout, delay_seconds=None):
+    def fake_download_pdf(_result, dest_path, _timeout, delay_seconds=None, **_kwargs):
         dest_path.parent.mkdir(parents=True, exist_ok=True)
         dest_path.write_bytes(b"pdf")
         return None
@@ -185,10 +185,10 @@ def test_download_by_id_inserts_metadata(tmp_path, monkeypatch):
         def get_short_id():
             return "2311.12022v2"
 
-    def fake_fetch_results(_ids):
+    def fake_fetch_results(_ids, **_kwargs):
         return {"2311.12022": FakeResult()}
 
-    def fake_download_pdf(_result, dest_path, _timeout, delay_seconds=None):
+    def fake_download_pdf(_result, dest_path, _timeout, delay_seconds=None, **_kwargs):
         dest_path.parent.mkdir(parents=True, exist_ok=True)
         dest_path.write_bytes(b"pdf")
         return None
@@ -243,10 +243,10 @@ def test_download_by_id_no_db_skips_insert(tmp_path, monkeypatch):
         def get_short_id():
             return "2311.12022v2"
 
-    def fake_fetch_results(_ids):
+    def fake_fetch_results(_ids, **_kwargs):
         return {"2311.12022": FakeResult()}
 
-    def fake_download_pdf(_result, dest_path, _timeout, delay_seconds=None):
+    def fake_download_pdf(_result, dest_path, _timeout, delay_seconds=None, **_kwargs):
         dest_path.parent.mkdir(parents=True, exist_ok=True)
         dest_path.write_bytes(b"pdf")
         return None
@@ -295,7 +295,7 @@ def test_backfill_inserts_metadata_for_existing_pdfs(tmp_path, monkeypatch):
         def get_short_id():
             return "2311.12022v1"
 
-    def fake_fetch_results(_ids):
+    def fake_fetch_results(_ids, **_kwargs):
         return {"2311.12022": FakeResult()}
 
     monkeypatch.setattr(download, "_fetch_results", fake_fetch_results)
