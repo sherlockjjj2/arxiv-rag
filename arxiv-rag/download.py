@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import glob
 import os
 import re
 import sys
@@ -15,7 +14,7 @@ from typing import Dict, Iterable, List, Optional, Set
 import arxiv
 import requests
 
-PDF_DIR = Path("data/arxiv_papers")
+PDF_DIR = Path("data/arxiv-papers")
 ID_INDEX = PDF_DIR / "arxiv_ids.txt"
 
 _NEW_ID_RE = re.compile(r"^\d{4}\.\d{4,5}$")
@@ -28,7 +27,7 @@ _VERSIONED_OLD_ID_RE = re.compile(
     r"^(?P<base>[a-z-]+(\.[A-Z]{2})?/\d{7})v\d+$",
     re.IGNORECASE,
 )
-_USER_AGENT = "arxiv-rag (mailto:unknown)"
+_USER_AGENT = "arxiv-rag/0.1.0"
 _CLIENT_DELAY_SECONDS = 10.0
 _CLIENT_NUM_RETRIES = 5
 _CLIENT: Optional[arxiv.Client] = None
@@ -47,12 +46,23 @@ def _load_id_index() -> Set[str]:
         return {line.strip() for line in handle if line.strip()}
 
 
-def _append_id(base_id: str, existing: Set[str]) -> None:
-    if base_id in existing:
-        return
-    with ID_INDEX.open("a", encoding="utf-8") as handle:
-        handle.write(f"{base_id}\n")
-    existing.add(base_id)
+def _sync_id_index(existing: Set[str]) -> None:
+    current_ids: Set[str] = set()
+    if PDF_DIR.exists():
+        for pdf_path in PDF_DIR.glob("*.pdf"):
+            base_id = _base_id_from_versioned(pdf_path.stem)
+            if _is_valid_base_id(base_id):
+                current_ids.add(base_id)
+
+    existing.clear()
+    existing.update(current_ids)
+    _write_id_index(existing)
+
+
+def _write_id_index(existing: Set[str]) -> None:
+    with ID_INDEX.open("w", encoding="utf-8") as handle:
+        for base_id in sorted(existing):
+            handle.write(f"{base_id}\n")
 
 
 def _base_id_from_versioned(versioned_id: str) -> str:
@@ -74,16 +84,10 @@ def _validate_base_ids(ids: Iterable[str]) -> List[str]:
     return invalid
 
 
-def _find_existing_pdf(base_id: str) -> bool:
-    pattern = str(PDF_DIR / f"{base_id}v*.pdf")
-    return bool(glob.glob(pattern))
-
-
 def _get_client() -> arxiv.Client:
     global _CLIENT
     if _CLIENT is None:
         _CLIENT = arxiv.Client(
-            user_agent=_USER_AGENT,
             delay_seconds=_CLIENT_DELAY_SECONDS,
             num_retries=_CLIENT_NUM_RETRIES,
         )
@@ -136,7 +140,9 @@ def _download_pdf(
     if response.status_code == 429:
         retry_after = response.headers.get("Retry-After")
         if retry_after and retry_after.isdigit():
+            response.close()
             return int(retry_after)
+        response.close()
         return delay_seconds
     response.raise_for_status()
     tmp_path = dest_path.with_suffix(dest_path.suffix + ".part")
@@ -155,6 +161,7 @@ def _download_pdf(
 def _download_by_id(ids: List[str], retries: int, timeout: int) -> int:
     _ensure_paths()
     existing_ids = _load_id_index()
+    _sync_id_index(existing_ids)
 
     unique_ids: List[str] = []
     seen: Set[str] = set()
@@ -169,13 +176,18 @@ def _download_by_id(ids: List[str], retries: int, timeout: int) -> int:
             print(f"Error: invalid arXiv ID format: {base_id}", file=sys.stderr)
         return 1
 
-    results = _fetch_results(unique_ids)
+    pending_ids = [base_id for base_id in unique_ids if base_id not in existing_ids]
+    if not pending_ids:
+        for base_id in unique_ids:
+            print(f"Skipped {base_id}: already downloaded.")
+        return 0
+
+    results = _fetch_results(pending_ids)
     failures: List[str] = []
 
     for base_id in unique_ids:
-        if _find_existing_pdf(base_id) or base_id in existing_ids:
-            reason = "already downloaded" if base_id in existing_ids else "PDF exists"
-            print(f"Skipped {base_id}: {reason}.")
+        if base_id in existing_ids:
+            print(f"Skipped {base_id}: already downloaded.")
             continue
 
         result = results.get(base_id)
@@ -191,6 +203,10 @@ def _download_by_id(ids: List[str], retries: int, timeout: int) -> int:
             continue
 
         dest_path = PDF_DIR / f"{short_id}.pdf"
+        if dest_path.exists():
+            print(f"Skipped {base_id}: PDF exists.")
+            existing_ids.add(base_id)
+            continue
 
         for attempt in range(retries):
             try:
@@ -206,7 +222,7 @@ def _download_by_id(ids: List[str], retries: int, timeout: int) -> int:
                         raise RuntimeError("rate limited by arXiv")
                     time.sleep(retry_after)
                     continue
-                _append_id(base_id, existing_ids)
+                existing_ids.add(base_id)
                 print(f"Downloaded {base_id} -> {dest_path}")
                 break
             except Exception as exc:  # noqa: BLE001
@@ -221,6 +237,7 @@ def _download_by_id(ids: List[str], retries: int, timeout: int) -> int:
                 else:
                     time.sleep(2 ** attempt)
 
+    _write_id_index(existing_ids)
     return 1 if failures else 0
 
 

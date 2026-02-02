@@ -15,7 +15,7 @@ def _load_download_module():
 
 def test_base_id_validation():
     download = _load_download_module()
-    assert download._is_valid_base_id("2301.12345")
+    assert download._is_valid_base_id("2311.12022")
     assert download._is_valid_base_id("0704.0001")
     assert download._is_valid_base_id("cs/9901001")
     assert download._is_valid_base_id("cs.DS/0101001")
@@ -25,14 +25,14 @@ def test_base_id_validation():
 
 def test_base_id_from_versioned():
     download = _load_download_module()
-    assert download._base_id_from_versioned("2301.12345v2") == "2301.12345"
+    assert download._base_id_from_versioned("2311.12022v2") == "2311.12022"
     assert download._base_id_from_versioned("cs.DS/0101001v3") == "cs.DS/0101001"
     assert download._base_id_from_versioned("randomv2") == "randomv2"
 
 
 def test_download_by_id_invalid_ids(tmp_path, capsys, monkeypatch):
     download = _load_download_module()
-    pdf_dir = tmp_path / "arxiv_papers"
+    pdf_dir = tmp_path / "arxiv-papers"
     monkeypatch.setattr(download, "PDF_DIR", pdf_dir)
     monkeypatch.setattr(download, "ID_INDEX", pdf_dir / "arxiv_ids.txt")
 
@@ -44,9 +44,9 @@ def test_download_by_id_invalid_ids(tmp_path, capsys, monkeypatch):
 
 def test_download_by_id_skips_existing(tmp_path, capsys, monkeypatch):
     download = _load_download_module()
-    pdf_dir = tmp_path / "arxiv_papers"
+    pdf_dir = tmp_path / "arxiv-papers"
     pdf_dir.mkdir(parents=True)
-    existing_pdf = pdf_dir / "2301.12345v1.pdf"
+    existing_pdf = pdf_dir / "2311.12022v1.pdf"
     existing_pdf.write_bytes(b"pdf")
 
     monkeypatch.setattr(download, "PDF_DIR", pdf_dir)
@@ -58,15 +58,16 @@ def test_download_by_id_skips_existing(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr(download, "_download_pdf", fake_download_pdf)
     monkeypatch.setattr(download, "_fetch_results", lambda _ids: {})
 
-    exit_code = download._download_by_id(["2301.12345"], retries=1, timeout=1)
+    exit_code = download._download_by_id(["2311.12022"], retries=1, timeout=1)
     captured = capsys.readouterr()
     assert exit_code == 0
-    assert "Skipped 2301.12345" in captured.out
+    assert "Skipped 2311.12022" in captured.out
+    assert download.ID_INDEX.read_text(encoding="utf-8").strip() == "2311.12022"
 
 
 def test_download_by_id_downloads_and_records(tmp_path, capsys, monkeypatch):
     download = _load_download_module()
-    pdf_dir = tmp_path / "arxiv_papers"
+    pdf_dir = tmp_path / "arxiv-papers"
     monkeypatch.setattr(download, "PDF_DIR", pdf_dir)
     monkeypatch.setattr(download, "ID_INDEX", pdf_dir / "arxiv_ids.txt")
 
@@ -75,10 +76,10 @@ def test_download_by_id_downloads_and_records(tmp_path, capsys, monkeypatch):
 
         @staticmethod
         def get_short_id():
-            return "2301.12345v2"
+            return "2311.12022v2"
 
     def fake_fetch_results(_ids):
-        return {"2301.12345": FakeResult()}
+        return {"2311.12022": FakeResult()}
 
     def fake_download_pdf(_result, dest_path, _timeout, delay_seconds=None):
         dest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -88,9 +89,27 @@ def test_download_by_id_downloads_and_records(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr(download, "_fetch_results", fake_fetch_results)
     monkeypatch.setattr(download, "_download_pdf", fake_download_pdf)
 
-    exit_code = download._download_by_id(["2301.12345"], retries=1, timeout=1)
+    exit_code = download._download_by_id(["2311.12022"], retries=1, timeout=1)
     captured = capsys.readouterr()
     assert exit_code == 0
-    assert (pdf_dir / "2301.12345v2.pdf").exists()
-    assert "Downloaded 2301.12345" in captured.out
-    assert download.ID_INDEX.read_text(encoding="utf-8").strip() == "2301.12345"
+    assert (pdf_dir / "2311.12022v2.pdf").exists()
+    assert "Downloaded 2311.12022" in captured.out
+    assert download.ID_INDEX.read_text(encoding="utf-8").strip() == "2311.12022"
+
+
+def test_sync_rebuilds_index(tmp_path, monkeypatch):
+    download = _load_download_module()
+    pdf_dir = tmp_path / "arxiv-papers"
+    pdf_dir.mkdir(parents=True)
+    (pdf_dir / "2311.12022v1.pdf").write_bytes(b"pdf")
+
+    monkeypatch.setattr(download, "PDF_DIR", pdf_dir)
+    monkeypatch.setattr(download, "ID_INDEX", pdf_dir / "arxiv_ids.txt")
+
+    download.ID_INDEX.write_text("2311.12022\n", encoding="utf-8")
+    existing = download._load_id_index()
+
+    download._sync_id_index(existing)
+
+    assert existing == {"2311.12022"}
+    assert download.ID_INDEX.read_text(encoding="utf-8").strip() == "2311.12022"
