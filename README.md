@@ -56,6 +56,18 @@ Optional header/footer removal:
 uv run python arxiv-rag/parse.py --pdf data/arxiv-papers/2505.09388v1.pdf --remove-headers-footers
 ```
 
+Chunk parsed JSON into SQLite (requires metadata in `papers` table):
+
+```bash
+uv run python arxiv-rag/chunk.py --parsed data/parsed/2505.09388v1.json --db data/arxiv_rag.db
+```
+
+Chunk an entire directory of parsed JSON files:
+
+```bash
+uv run python arxiv-rag/chunk.py --parsed data/parsed --db data/arxiv_rag.db
+```
+
 ## Testing
 
 ```bash

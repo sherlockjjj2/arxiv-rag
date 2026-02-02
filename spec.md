@@ -129,6 +129,7 @@ Start with a focused topic to make evaluation easier:
 -- Papers metadata
 CREATE TABLE papers (
     paper_id TEXT PRIMARY KEY,      -- arXiv ID: "2312.10997"
+    doc_id TEXT NOT NULL,           -- SHA1 of PDF bytes (version/dedup)
     title TEXT NOT NULL,
     authors TEXT,                   -- JSON array
     abstract TEXT,
@@ -137,13 +138,15 @@ CREATE TABLE papers (
     pdf_path TEXT,
     total_pages INTEGER,
     indexed_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    source_type TEXT DEFAULT 'arxiv'  -- For future: 'arxiv', 'local', 'url'
+    source_type TEXT DEFAULT 'arxiv', -- For future: 'arxiv', 'local', 'url'
+    UNIQUE(doc_id)
 );
 
 -- Chunks with page-level granularity
 CREATE TABLE chunks (
     chunk_id INTEGER PRIMARY KEY AUTOINCREMENT,
     paper_id TEXT NOT NULL,
+    doc_id TEXT NOT NULL,
     page_number INTEGER NOT NULL,
     chunk_index INTEGER NOT NULL,   -- 0, 1, 2... within page
     text TEXT NOT NULL,
@@ -152,7 +155,8 @@ CREATE TABLE chunks (
     token_count INTEGER,
     embedding BLOB,                 -- Store embedding as numpy bytes (optional)
     FOREIGN KEY (paper_id) REFERENCES papers(paper_id),
-    UNIQUE(paper_id, page_number, chunk_index)
+    FOREIGN KEY (doc_id) REFERENCES papers(doc_id),
+    UNIQUE(doc_id, page_number, chunk_index)
 );
 
 -- Full-text search index
@@ -191,10 +195,11 @@ collection = chroma_client.create_collection(
 
 # Each document stores:
 {
-    "id": "2312.10997_p5_c2",        # paper_page_chunk
+    "id": "b1946ac9_p5_c2",          # doc_id_page_chunk
     "embedding": [...],              # from OpenAI
     "metadata": {
         "paper_id": "2312.10997",
+        "doc_id": "b1946ac92492d2347c6235b4d2611184",
         "page": 5,
         "chunk_index": 2,
         "title": "RAG Survey"        # Denormalized for display
@@ -247,9 +252,24 @@ PDF path
   └─ emit JSON: doc_id, pdf_path, num_pages, pages[{page, text}]
 ```
 
+#### Ingestion/versioning flow (planned)
+
+```
+Parse JSON (doc_id, pages)
+  │
+  ├─ fetch arXiv metadata -> paper_id, title, authors, etc.
+  ├─ upsert papers(paper_id, doc_id, ...)
+  │    └─ if paper_id exists with different doc_id: delete old chunks/vectors
+  ├─ chunk pages using (paper_id, doc_id)
+  ├─ insert chunks (unique on doc_id + page_number + chunk_index)
+  └─ insert vectors with id = doc_id_page_chunk
+```
+
 ## Design decisions\*\*
 
-- Stable IDs via SHA1 of file bytes (path-independent).
+- Store both `paper_id` (human-facing arXiv ID) and `doc_id` (SHA1 of PDF bytes).
+- Use `doc_id` for versioning/dedup; if a `paper_id` is re-downloaded with a new
+  `doc_id`, replace the prior record unless versioning is added later.
 - Per-page error isolation; parsing continues even if a page fails.
 - Text-layer only; no OCR, no chunking.
 - Header/footer removal is optional to avoid dropping real section headers.
@@ -257,19 +277,21 @@ PDF path
 ### 5.2 Chunking Strategy
 
 ```python
-from tiktoken import encoding_for_model
+from tiktoken import get_encoding
 
 def chunk_page(
     page_text: str,
     page_num: int,
     paper_id: str,
+    doc_id: str,
     target_tokens: int = 512,
     overlap_tokens: int = 100
 ) -> list[dict]:
     """
     Chunk by tokens with overlap. Page-aware.
+    Baseline: 512 tokens with 100 overlap (MVP default).
     """
-    enc = encoding_for_model("gpt-4")
+    enc = get_encoding("cl100k_base")
     tokens = enc.encode(page_text)
 
     chunks = []
@@ -287,6 +309,7 @@ def chunk_page(
 
         chunks.append({
             "paper_id": paper_id,
+            "doc_id": doc_id,
             "page_number": page_num,
             "chunk_index": chunk_idx,
             "text": chunk_text,
