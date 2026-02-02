@@ -3,22 +3,16 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
 from tiktoken import Encoding, get_encoding
 
-LOGGER = logging.getLogger(__name__)
+from arxiv_rag.arxiv_ids import base_id_from_versioned, is_valid_base_id
+from arxiv_rag.db import ensure_chunks_schema, ensure_papers_schema
 
-_NEW_ID_RE = re.compile(r"^\d{4}\.\d{4,5}$")
-_OLD_ID_RE = re.compile(r"^[a-z-]+(\.[A-Z]{2})?/\d{7}$", re.IGNORECASE)
-_VERSIONED_NEW_ID_RE = re.compile(r"^(?P<base>\d{4}\.\d{4,5})v\d+$")
-_VERSIONED_OLD_ID_RE = re.compile(
-    r"^(?P<base>[a-z-]+(\.[A-Z]{2})?/\d{7})v\d+$",
-    re.IGNORECASE,
-)
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -74,17 +68,6 @@ class ChunkRecord:
             self.token_count,
         )
 
-
-def _base_id_from_versioned(arxiv_id: str) -> str:
-    """Return the base arXiv ID without a version suffix."""
-
-    if match := _VERSIONED_NEW_ID_RE.match(arxiv_id):
-        return match.group("base")
-    if match := _VERSIONED_OLD_ID_RE.match(arxiv_id):
-        return match.group("base")
-    return arxiv_id
-
-
 def _infer_paper_id(parsed_doc: ParsedDocument, parsed_path: Path) -> str | None:
     """Infer a base arXiv ID from the parsed JSON or PDF path."""
 
@@ -94,8 +77,8 @@ def _infer_paper_id(parsed_doc: ParsedDocument, parsed_path: Path) -> str | None
     candidates.append(parsed_path.stem)
 
     for candidate in candidates:
-        base_id = _base_id_from_versioned(candidate)
-        if _NEW_ID_RE.match(base_id) or _OLD_ID_RE.match(base_id):
+        base_id = base_id_from_versioned(candidate)
+        if is_valid_base_id(base_id):
             return base_id
     return None
 
@@ -171,17 +154,20 @@ def chunk_page(
     if not tokens:
         return []
 
+    token_texts = [encoder.decode([token]) for token in tokens]
+    char_offsets = [0]
+    for token_text in token_texts:
+        char_offsets.append(char_offsets[-1] + len(token_text))
+
     chunks: list[ChunkRecord] = []
     start = 0
     chunk_idx = 0
 
     while start < len(tokens):
         end = min(start + config.target_tokens, len(tokens))
-        chunk_tokens = tokens[start:end]
-        chunk_text = encoder.decode(chunk_tokens)
-
-        char_start = len(encoder.decode(tokens[:start]))
-        char_end = char_start + len(chunk_text)
+        chunk_text = "".join(token_texts[start:end])
+        char_start = char_offsets[start]
+        char_end = char_offsets[end]
 
         chunks.append(
             ChunkRecord(
@@ -192,7 +178,7 @@ def chunk_page(
                 text=chunk_text,
                 char_start=char_start,
                 char_end=char_end,
-                token_count=len(chunk_tokens),
+                token_count=end - start,
             )
         )
 
@@ -223,87 +209,6 @@ def chunk_document(
             )
         )
     return chunks
-
-
-def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
-    row = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-        (table_name,),
-    ).fetchone()
-    return row is not None
-
-
-def _ensure_papers_doc_id(conn: sqlite3.Connection) -> None:
-    """Ensure the papers table has a doc_id column."""
-
-    if not _table_exists(conn, "papers"):
-        raise ValueError("papers table not found; run download.py with --db first.")
-
-    columns = {
-        row[1] for row in conn.execute("PRAGMA table_info(papers)").fetchall()
-    }
-    if "doc_id" not in columns:
-        conn.execute("ALTER TABLE papers ADD COLUMN doc_id TEXT")
-
-
-def _ensure_chunks_schema(conn: sqlite3.Connection) -> None:
-    """Ensure the chunks and FTS tables exist."""
-
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS chunks (
-            chunk_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            paper_id TEXT NOT NULL,
-            doc_id TEXT NOT NULL,
-            page_number INTEGER NOT NULL,
-            chunk_index INTEGER NOT NULL,
-            text TEXT NOT NULL,
-            char_start INTEGER,
-            char_end INTEGER,
-            token_count INTEGER,
-            embedding BLOB,
-            UNIQUE(doc_id, page_number, chunk_index),
-            FOREIGN KEY (paper_id) REFERENCES papers(paper_id) ON DELETE CASCADE
-        );
-        """
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS chunks_paper_id_idx ON chunks(paper_id)"
-    )
-    conn.execute("CREATE INDEX IF NOT EXISTS chunks_doc_id_idx ON chunks(doc_id)")
-    conn.execute(
-        """
-        CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
-            text,
-            content='chunks',
-            content_rowid='chunk_id'
-        );
-        """
-    )
-    conn.execute(
-        """
-        CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN
-            INSERT INTO chunks_fts(rowid, text) VALUES (new.chunk_id, new.text);
-        END;
-        """
-    )
-    conn.execute(
-        """
-        CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON chunks BEGIN
-            INSERT INTO chunks_fts(chunks_fts, rowid, text)
-            VALUES ('delete', old.chunk_id, old.text);
-        END;
-        """
-    )
-    conn.execute(
-        """
-        CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE OF text ON chunks BEGIN
-            INSERT INTO chunks_fts(chunks_fts, rowid, text)
-            VALUES ('delete', old.chunk_id, old.text);
-            INSERT INTO chunks_fts(rowid, text) VALUES (new.chunk_id, new.text);
-        END;
-        """
-    )
 
 
 def _delete_chunks_where(
@@ -389,8 +294,8 @@ def _ingest_chunks(
     """Insert chunks into SQLite, replacing older versions."""
 
     conn.execute("PRAGMA foreign_keys = ON")
-    _ensure_papers_doc_id(conn)
-    _ensure_chunks_schema(conn)
+    ensure_papers_schema(conn, create_if_missing=False)
+    ensure_chunks_schema(conn)
 
     existing_doc_id = _update_paper_doc_id(
         conn,

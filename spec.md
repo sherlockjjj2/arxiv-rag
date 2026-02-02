@@ -711,12 +711,12 @@ def evaluate(eval_set: list[dict]) -> dict:
 
 **Goal**: 50 papers indexed and queryable via BM25
 
-- [ ] Set up project structure
-- [ ] Implement arXiv download script (IDs + keyword search)
-- [ ] PDF extraction with PyMuPDF
-- [ ] Chunking with page tracking
-- [ ] SQLite schema + FTS5 index
-- [ ] Basic CLI: `query` command (BM25 only)
+- [x] Set up project structure
+- [x] Implement arXiv download script (IDs + keyword search)
+- [x] PDF extraction with PyMuPDF
+- [x] Chunking with page tracking
+- [x] SQLite schema + FTS5 index
+- [x] Basic CLI: `query` command (BM25 only)
 
 **Deliverable**: Can run `arxiv-rag query "dense retrieval"` and get text chunks back
 

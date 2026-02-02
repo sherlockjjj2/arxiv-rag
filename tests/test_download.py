@@ -7,6 +7,9 @@ from datetime import datetime
 
 def _load_download_module():
     module_path = Path(__file__).resolve().parents[1] / "arxiv_rag" / "download.py"
+    repo_root = Path(__file__).resolve().parents[1]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
     spec = importlib.util.spec_from_file_location("download", module_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -16,21 +19,35 @@ def _load_download_module():
     return module
 
 
+def _load_arxiv_ids_module():
+    module_path = Path(__file__).resolve().parents[1] / "arxiv_rag" / "arxiv_ids.py"
+    repo_root = Path(__file__).resolve().parents[1]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    spec = importlib.util.spec_from_file_location("arxiv_ids", module_path)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["arxiv_ids"] = module
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_base_id_validation():
-    download = _load_download_module()
-    assert download._is_valid_base_id("2311.12022")
-    assert download._is_valid_base_id("0704.0001")
-    assert download._is_valid_base_id("cs/9901001")
-    assert download._is_valid_base_id("cs.DS/0101001")
-    assert not download._is_valid_base_id("2301.1234v2")
-    assert not download._is_valid_base_id("not-an-id")
+    arxiv_ids = _load_arxiv_ids_module()
+    assert arxiv_ids.is_valid_base_id("2311.12022")
+    assert arxiv_ids.is_valid_base_id("0704.0001")
+    assert arxiv_ids.is_valid_base_id("cs/9901001")
+    assert arxiv_ids.is_valid_base_id("cs.DS/0101001")
+    assert not arxiv_ids.is_valid_base_id("2301.1234v2")
+    assert not arxiv_ids.is_valid_base_id("not-an-id")
 
 
 def test_base_id_from_versioned():
-    download = _load_download_module()
-    assert download._base_id_from_versioned("2311.12022v2") == "2311.12022"
-    assert download._base_id_from_versioned("cs.DS/0101001v3") == "cs.DS/0101001"
-    assert download._base_id_from_versioned("randomv2") == "randomv2"
+    arxiv_ids = _load_arxiv_ids_module()
+    assert arxiv_ids.base_id_from_versioned("2311.12022v2") == "2311.12022"
+    assert arxiv_ids.base_id_from_versioned("cs.DS/0101001v3") == "cs.DS/0101001"
+    assert arxiv_ids.base_id_from_versioned("randomv2") == "randomv2"
 
 
 def test_download_by_id_invalid_ids(tmp_path, capsys, monkeypatch):

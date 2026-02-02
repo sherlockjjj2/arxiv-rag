@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sqlite3
 import sys
 import time
@@ -16,20 +15,16 @@ from typing import Callable, Iterable, Sequence
 import arxiv
 import requests
 
+from arxiv_rag.arxiv_ids import (
+    base_id_from_versioned,
+    is_valid_base_id,
+    validate_base_ids,
+)
+from arxiv_rag.db import ensure_papers_db
+
 PDF_DIR = Path("data/arxiv-papers")
 ID_INDEX = PDF_DIR / "arxiv_ids.txt"
 DEFAULT_DB_PATH = Path("data/arxiv_rag.db")
-
-_NEW_ID_RE = re.compile(r"^\d{4}\.\d{4,5}$")
-_OLD_ID_RE = re.compile(
-    r"^[a-z-]+(\.[A-Z]{2})?/\d{7}$",
-    re.IGNORECASE,
-)
-_VERSIONED_NEW_ID_RE = re.compile(r"^(?P<base>\d{4}\.\d{4,5})v\d+$")
-_VERSIONED_OLD_ID_RE = re.compile(
-    r"^(?P<base>[a-z-]+(\.[A-Z]{2})?/\d{7})v\d+$",
-    re.IGNORECASE,
-)
 _USER_AGENT = "arxiv-rag/0.1.0"
 _CLIENT_DELAY_SECONDS = 10.0
 _CLIENT_NUM_RETRIES = 5
@@ -147,7 +142,7 @@ class ArxivApiClient:
         results: dict[str, arxiv.Result] = {}
         for result in self.client.results(search):
             short_id = result.get_short_id()
-            base_id = _base_id_from_versioned(short_id)
+            base_id = base_id_from_versioned(short_id)
             results[base_id] = result
         return results
 
@@ -273,8 +268,8 @@ def _sync_id_index(
     current_ids: set[str] = set()
     if resolved_config.pdf_dir.exists():
         for pdf_path in resolved_config.pdf_dir.glob("*.pdf"):
-            base_id = _base_id_from_versioned(pdf_path.stem)
-            if _is_valid_base_id(base_id):
+            base_id = base_id_from_versioned(pdf_path.stem)
+            if is_valid_base_id(base_id):
                 current_ids.add(base_id)
 
     existing.clear()
@@ -303,50 +298,6 @@ def _write_id_index(
             handle.write(f"{base_id}\n")
 
 
-def _base_id_from_versioned(versioned_id: str) -> str:
-    """Strip version suffixes from arXiv IDs.
-
-    Args:
-        versioned_id: ID that may include a version suffix.
-    Returns:
-        Base arXiv ID without version suffix.
-    Edge cases:
-        Returns the input unchanged when no version suffix is present.
-    """
-
-    if match := _VERSIONED_NEW_ID_RE.match(versioned_id):
-        return match.group("base")
-    if match := _VERSIONED_OLD_ID_RE.match(versioned_id):
-        return match.group("base")
-    return versioned_id
-
-
-def _is_valid_base_id(base_id: str) -> bool:
-    """Check whether a base arXiv ID matches known patterns.
-
-    Args:
-        base_id: Base arXiv ID to validate.
-    Returns:
-        True if the ID matches a valid format, otherwise False.
-    """
-
-    return bool(_NEW_ID_RE.match(base_id) or _OLD_ID_RE.match(base_id))
-
-
-def _validate_base_ids(ids: Iterable[str]) -> list[str]:
-    """Collect invalid base IDs from an iterable.
-
-    Args:
-        ids: Iterable of base IDs to validate.
-    Returns:
-        List of invalid base IDs.
-    Edge cases:
-        Returns an empty list when all IDs are valid.
-    """
-
-    return [base_id for base_id in ids if not _is_valid_base_id(base_id)]
-
-
 def _search(
     query: str,
     max_results: int,
@@ -373,7 +324,7 @@ def _search(
     resolved_client = _resolve_client(client, resolved_config)
     for result in resolved_client.search(query, max_results, sort):
         short_id = result.get_short_id()
-        base_id = _base_id_from_versioned(short_id)
+        base_id = base_id_from_versioned(short_id)
         print(f"{base_id}\t{result.title}")
     return 0
 
@@ -466,30 +417,7 @@ def _ensure_db(db_path: Path) -> None:
         sqlite3.Error: If the database cannot be initialized.
     """
 
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS papers (
-                paper_id TEXT PRIMARY KEY,
-                doc_id TEXT,
-                title TEXT NOT NULL,
-                authors TEXT,
-                abstract TEXT,
-                categories TEXT,
-                published_date TEXT,
-                pdf_path TEXT,
-                total_pages INTEGER,
-                indexed_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                source_type TEXT DEFAULT 'arxiv',
-                UNIQUE(doc_id)
-            );
-            """
-        )
-        columns = {row[1] for row in conn.execute("PRAGMA table_info(papers)")}
-        if "doc_id" not in columns:
-            conn.execute("ALTER TABLE papers ADD COLUMN doc_id TEXT")
-        conn.commit()
+    ensure_papers_db(db_path)
 
 
 def _metadata_from_result(result: arxiv.Result, pdf_path: Path) -> PaperMetadata:
@@ -505,7 +433,7 @@ def _metadata_from_result(result: arxiv.Result, pdf_path: Path) -> PaperMetadata
     """
 
     short_id = result.get_short_id()
-    base_id = _base_id_from_versioned(short_id)
+    base_id = base_id_from_versioned(short_id)
     authors = json.dumps([author.name for author in result.authors] or [])
     categories = json.dumps(list(result.categories) if result.categories else [])
     published = result.published.date().isoformat() if result.published else None
@@ -607,8 +535,8 @@ def _collect_pdf_paths(config: DownloadConfig | None = None) -> dict[str, Path]:
     if not resolved_config.pdf_dir.exists():
         return pdf_paths
     for pdf_path in resolved_config.pdf_dir.glob("*.pdf"):
-        base_id = _base_id_from_versioned(pdf_path.stem)
-        if not _is_valid_base_id(base_id):
+        base_id = base_id_from_versioned(pdf_path.stem)
+        if not is_valid_base_id(base_id):
             continue
         if (
             base_id in pdf_paths
@@ -874,7 +802,7 @@ def _download_by_id(
         _sync_id_index(existing_ids, resolved_config)
 
     unique_ids = _deduped_ids(ids)
-    if invalid_ids := _validate_base_ids(unique_ids):
+    if invalid_ids := validate_base_ids(unique_ids):
         _report_invalid_ids(invalid_ids)
         return 1
 
