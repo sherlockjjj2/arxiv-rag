@@ -137,6 +137,15 @@ uv run arxiv-rag query "dense retrieval" --show-score
 - Parsed JSON: `data/parsed/`
 - SQLite DB: `data/arxiv_rag.db`
 
+## Notes
+
+### 2026-02-22
+
+- Current implementation is CLI-only: download/search arXiv, parse PDFs, chunk into SQLite, and query via FTS5 (BM25).
+- Embeddings are not generated or used; no vector DB or hybrid retrieval is implemented.
+- No LLM answer generation or citation verification is implemented.
+- Query logging is not implemented.
+
 ## Development notes
 
 - arXiv ID parsing helpers live in `arxiv_rag/arxiv_ids.py`.
