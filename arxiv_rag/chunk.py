@@ -167,7 +167,7 @@ def chunk_page(
     if not page_text.strip():
         return []
 
-    tokens = encoder.encode(page_text)
+    tokens = encoder.encode(page_text, disallowed_special=())
     if not tokens:
         return []
 
@@ -261,10 +261,16 @@ def _ensure_chunks_schema(conn: sqlite3.Connection) -> None:
             char_start INTEGER,
             char_end INTEGER,
             token_count INTEGER,
-            embedding BLOB
+            embedding BLOB,
+            UNIQUE(doc_id, page_number, chunk_index),
+            FOREIGN KEY (paper_id) REFERENCES papers(paper_id) ON DELETE CASCADE
         );
         """
     )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS chunks_paper_id_idx ON chunks(paper_id)"
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS chunks_doc_id_idx ON chunks(doc_id)")
     conn.execute(
         """
         CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
@@ -281,6 +287,23 @@ def _ensure_chunks_schema(conn: sqlite3.Connection) -> None:
         END;
         """
     )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON chunks BEGIN
+            INSERT INTO chunks_fts(chunks_fts, rowid, text)
+            VALUES ('delete', old.chunk_id, old.text);
+        END;
+        """
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE OF text ON chunks BEGIN
+            INSERT INTO chunks_fts(chunks_fts, rowid, text)
+            VALUES ('delete', old.chunk_id, old.text);
+            INSERT INTO chunks_fts(rowid, text) VALUES (new.chunk_id, new.text);
+        END;
+        """
+    )
 
 
 def _delete_chunks_where(
@@ -288,20 +311,10 @@ def _delete_chunks_where(
     where_sql: str,
     params: tuple[object, ...],
 ) -> int:
-    """Delete chunks and matching FTS rows for a predicate."""
+    """Delete chunks for a predicate (FTS triggers handle index updates)."""
 
-    deleted = 0
-    if _table_exists(conn, "chunks_fts"):
-        conn.execute(
-            f"""
-            DELETE FROM chunks_fts
-            WHERE rowid IN (SELECT chunk_id FROM chunks WHERE {where_sql})
-            """,
-            params,
-        )
     cursor = conn.execute(f"DELETE FROM chunks WHERE {where_sql}", params)
-    deleted = cursor.rowcount if cursor.rowcount is not None else 0
-    return deleted
+    return cursor.rowcount if cursor.rowcount is not None else 0
 
 
 def _resolve_paper_id(
@@ -359,7 +372,7 @@ def _update_paper_doc_id(
     conn.execute(
         """
         UPDATE papers
-        SET doc_id = ?, pdf_path = COALESCE(pdf_path, ?)
+        SET doc_id = ?, pdf_path = COALESCE(?, pdf_path)
         WHERE paper_id = ?
         """,
         (doc_id, str(pdf_path) if pdf_path is not None else None, paper_id),

@@ -8,7 +8,7 @@ import pytest
 
 
 def _load_chunk_module():
-    module_path = Path(__file__).resolve().parents[1] / "arxiv-rag" / "chunk.py"
+    module_path = Path(__file__).resolve().parents[1] / "arxiv_rag" / "chunk.py"
     spec = importlib.util.spec_from_file_location("chunk", module_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)

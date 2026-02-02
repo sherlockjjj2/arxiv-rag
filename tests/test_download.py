@@ -6,7 +6,7 @@ from datetime import datetime
 
 
 def _load_download_module():
-    module_path = Path(__file__).resolve().parents[1] / "arxiv-rag" / "download.py"
+    module_path = Path(__file__).resolve().parents[1] / "arxiv_rag" / "download.py"
     spec = importlib.util.spec_from_file_location("download", module_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)

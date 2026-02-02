@@ -472,6 +472,7 @@ def _ensure_db(db_path: Path) -> None:
             """
             CREATE TABLE IF NOT EXISTS papers (
                 paper_id TEXT PRIMARY KEY,
+                doc_id TEXT,
                 title TEXT NOT NULL,
                 authors TEXT,
                 abstract TEXT,
@@ -480,10 +481,14 @@ def _ensure_db(db_path: Path) -> None:
                 pdf_path TEXT,
                 total_pages INTEGER,
                 indexed_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                source_type TEXT DEFAULT 'arxiv'
+                source_type TEXT DEFAULT 'arxiv',
+                UNIQUE(doc_id)
             );
             """
         )
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(papers)")}
+        if "doc_id" not in columns:
+            conn.execute("ALTER TABLE papers ADD COLUMN doc_id TEXT")
         conn.commit()
 
 
@@ -539,7 +544,7 @@ def _bulk_insert_metadata(
     with sqlite3.connect(db_path) as conn:
         conn.executemany(
             """
-            INSERT OR IGNORE INTO papers (
+            INSERT INTO papers (
                 paper_id,
                 title,
                 authors,
@@ -549,7 +554,17 @@ def _bulk_insert_metadata(
                 pdf_path,
                 total_pages,
                 source_type
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(paper_id) DO UPDATE SET
+                title = excluded.title,
+                authors = excluded.authors,
+                abstract = excluded.abstract,
+                categories = excluded.categories,
+                published_date = excluded.published_date,
+                pdf_path = excluded.pdf_path,
+                total_pages = excluded.total_pages,
+                source_type = excluded.source_type,
+                indexed_at = CURRENT_TIMESTAMP;
             """,
             [row.as_row() for row in rows],
         )

@@ -8,7 +8,7 @@ import pytest
 
 
 def _load_parse_module():
-    module_path = Path(__file__).resolve().parents[1] / "arxiv-rag" / "parse.py"
+    module_path = Path(__file__).resolve().parents[1] / "arxiv_rag" / "parse.py"
     spec = importlib.util.spec_from_file_location("parse", module_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)

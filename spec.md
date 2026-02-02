@@ -129,7 +129,7 @@ Start with a focused topic to make evaluation easier:
 -- Papers metadata
 CREATE TABLE papers (
     paper_id TEXT PRIMARY KEY,      -- arXiv ID: "2312.10997"
-    doc_id TEXT NOT NULL,           -- SHA1 of PDF bytes (version/dedup)
+    doc_id TEXT,                    -- SHA1 of PDF bytes (set after parsing)
     title TEXT NOT NULL,
     authors TEXT,                   -- JSON array
     abstract TEXT,
@@ -154,9 +154,8 @@ CREATE TABLE chunks (
     char_end INTEGER,
     token_count INTEGER,
     embedding BLOB,                 -- Store embedding as numpy bytes (optional)
-    FOREIGN KEY (paper_id) REFERENCES papers(paper_id),
-    FOREIGN KEY (doc_id) REFERENCES papers(doc_id),
-    UNIQUE(doc_id, page_number, chunk_index)
+    UNIQUE(doc_id, page_number, chunk_index),
+    FOREIGN KEY (paper_id) REFERENCES papers(paper_id) ON DELETE CASCADE
 );
 
 -- Full-text search index
@@ -168,6 +167,17 @@ CREATE VIRTUAL TABLE chunks_fts USING fts5(
 
 -- Triggers to keep FTS in sync
 CREATE TRIGGER chunks_ai AFTER INSERT ON chunks BEGIN
+    INSERT INTO chunks_fts(rowid, text) VALUES (new.chunk_id, new.text);
+END;
+
+CREATE TRIGGER chunks_ad AFTER DELETE ON chunks BEGIN
+    INSERT INTO chunks_fts(chunks_fts, rowid, text)
+    VALUES ('delete', old.chunk_id, old.text);
+END;
+
+CREATE TRIGGER chunks_au AFTER UPDATE OF text ON chunks BEGIN
+    INSERT INTO chunks_fts(chunks_fts, rowid, text)
+    VALUES ('delete', old.chunk_id, old.text);
     INSERT INTO chunks_fts(rowid, text) VALUES (new.chunk_id, new.text);
 END;
 
@@ -259,6 +269,7 @@ Parse JSON (doc_id, pages)
   │
   ├─ fetch arXiv metadata -> paper_id, title, authors, etc.
   ├─ upsert papers(paper_id, doc_id, ...)
+  │    ├─ update pdf_path/metadata on re-download
   │    └─ if paper_id exists with different doc_id: delete old chunks/vectors
   ├─ chunk pages using (paper_id, doc_id)
   ├─ insert chunks (unique on doc_id + page_number + chunk_index)
@@ -269,7 +280,9 @@ Parse JSON (doc_id, pages)
 
 - Store both `paper_id` (human-facing arXiv ID) and `doc_id` (SHA1 of PDF bytes).
 - Use `doc_id` for versioning/dedup; if a `paper_id` is re-downloaded with a new
-  `doc_id`, replace the prior record unless versioning is added later.
+  `doc_id`, replace the prior record (delete old chunks/vectors) unless versioning
+  is added later.
+- Metadata ingestion is an upsert; new downloads refresh title/authors/pdf_path.
 - Per-page error isolation; parsing continues even if a page fails.
 - Text-layer only; no OCR, no chunking.
 - Header/footer removal is optional to avoid dropping real section headers.
