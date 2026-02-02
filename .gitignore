@@ -1,9 +1,7 @@
 # macOS
 .DS_Store
 
-data/*
-!data/.gitkeep
-
+data/
 
 # Jupyter
 .ipynb_checkpoints/
