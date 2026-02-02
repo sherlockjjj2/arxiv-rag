@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
+import sqlite3
 import sys
 import time
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Set
+from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import arxiv
 import requests
@@ -31,6 +33,7 @@ _USER_AGENT = "arxiv-rag/0.1.0"
 _CLIENT_DELAY_SECONDS = 10.0
 _CLIENT_NUM_RETRIES = 5
 _CLIENT: Optional[arxiv.Client] = None
+DEFAULT_DB_PATH = Path("data/arxiv_rag.db")
 
 
 def _ensure_paths() -> None:
@@ -127,6 +130,8 @@ def _download_pdf(
     timeout: int,
     delay_seconds: Optional[int] = None,
 ) -> Optional[int]:
+    if not result.pdf_url:
+        return None
     headers = {"User-Agent": _USER_AGENT}
     with requests.get(
         result.pdf_url,
@@ -155,6 +160,130 @@ def _download_pdf(
         return None
 
 
+def _ensure_db(db_path: Path) -> None:
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS papers (
+                paper_id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                authors TEXT,
+                abstract TEXT,
+                categories TEXT,
+                published_date TEXT,
+                pdf_path TEXT,
+                total_pages INTEGER,
+                indexed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                source_type TEXT DEFAULT 'arxiv'
+            );
+            """
+        )
+        conn.commit()
+
+
+def _metadata_row_from_result(result: arxiv.Result, pdf_path: Path) -> Tuple[object, ...]:
+    short_id = result.get_short_id()
+    base_id = _base_id_from_versioned(short_id)
+    authors = json.dumps([author.name for author in result.authors])
+    categories = json.dumps(list(result.categories) if result.categories else [])
+    published = result.published.date().isoformat() if result.published else None
+
+    return (
+        base_id,
+        result.title,
+        authors,
+        result.summary,
+        categories,
+        published,
+        str(pdf_path),
+        None,
+        "arxiv",
+    )
+
+
+def _bulk_insert_metadata(db_path: Path, rows: Sequence[Tuple[object, ...]]) -> None:
+    if not rows:
+        return
+    _ensure_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.executemany(
+            """
+            INSERT OR IGNORE INTO papers (
+                paper_id,
+                title,
+                authors,
+                abstract,
+                categories,
+                published_date,
+                pdf_path,
+                total_pages,
+                source_type
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+            """,
+            rows,
+        )
+        conn.commit()
+
+
+def _load_db_ids(db_path: Path) -> Set[str]:
+    if not db_path.exists():
+        return set()
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute("SELECT paper_id FROM papers").fetchall()
+    return {row[0] for row in rows}
+
+
+def _collect_pdf_paths() -> Dict[str, Path]:
+    pdf_paths: Dict[str, Path] = {}
+    if not PDF_DIR.exists():
+        return pdf_paths
+    for pdf_path in PDF_DIR.glob("*.pdf"):
+        base_id = _base_id_from_versioned(pdf_path.stem)
+        if not _is_valid_base_id(base_id):
+            continue
+        if (
+            base_id in pdf_paths
+            and pdf_paths[base_id].stat().st_mtime >= pdf_path.stat().st_mtime
+        ):
+            continue
+        pdf_paths[base_id] = pdf_path
+    return pdf_paths
+
+
+def _backfill_metadata(db_path: Path) -> int:
+    _ensure_db(db_path)
+    pdf_paths = _collect_pdf_paths()
+    if not pdf_paths:
+        print("No PDFs found for metadata backfill.")
+        return 0
+
+    existing_ids = _load_db_ids(db_path)
+    pending_ids = [base_id for base_id in pdf_paths if base_id not in existing_ids]
+    if not pending_ids:
+        print("All PDFs already have metadata.")
+        return 0
+
+    results = _fetch_results(pending_ids)
+    metadata_rows: List[Tuple[object, ...]] = []
+    missing_ids: List[str] = []
+
+    for base_id in pending_ids:
+        if (result := results.get(base_id)) is None:
+            missing_ids.append(base_id)
+            continue
+        metadata_rows.append(_metadata_row_from_result(result, pdf_paths[base_id]))
+
+    if missing_ids:
+        for base_id in missing_ids:
+            print(f"Error: no metadata found for {base_id}.", file=sys.stderr)
+
+    if metadata_rows:
+        _bulk_insert_metadata(db_path, metadata_rows)
+        print(f"Metadata fetched and stored for {len(metadata_rows)} papers.")
+    return 1 if missing_ids else 0
+
+
 def _should_sync_id_index() -> bool:
     if not ID_INDEX.exists():
         return True
@@ -163,13 +292,13 @@ def _should_sync_id_index() -> bool:
     if ID_INDEX.stat().st_size == 0:
         return any(PDF_DIR.glob("*.pdf"))
     index_mtime = ID_INDEX.stat().st_mtime
-    for pdf_path in PDF_DIR.glob("*.pdf"):
-        if pdf_path.stat().st_mtime >= index_mtime:
-            return True
-    return False
+    return any(
+        pdf_path.stat().st_mtime >= index_mtime
+        for pdf_path in PDF_DIR.glob("*.pdf")
+    )
 
 
-def _dedupe_ids(ids: Iterable[str]) -> List[str]:
+def _deduped_ids(ids: Iterable[str]) -> List[str]:
     unique_ids: List[str] = []
     seen: Set[str] = set()
     for base_id in ids:
@@ -215,55 +344,94 @@ def _attempt_download(
     return f"failed to download {base_id} after {retries} attempts"
 
 
-def _download_by_id(ids: List[str], retries: int, timeout: int) -> int:
+def _collect_pending_ids(unique_ids: List[str], existing_ids: Set[str]) -> List[str]:
+    if pending_ids := [
+        base_id for base_id in unique_ids if base_id not in existing_ids
+    ]:
+        return pending_ids
+
+    for base_id in unique_ids:
+        print(f"Skipped {base_id}: already downloaded.")
+    return []
+
+
+def _handle_download_result(
+    base_id: str,
+    result: Optional[arxiv.Result],
+    existing_ids: Set[str],
+    retries: int,
+    timeout: int,
+) -> Tuple[Optional[Path], Optional[str]]:
+    if base_id in existing_ids:
+        print(f"Skipped {base_id}: already downloaded.")
+        return None, None
+    if result is None:
+        return None, f"no metadata found for {base_id}."
+    if not result.pdf_url:
+        return None, f"no PDF available for {base_id}."
+
+    short_id = result.get_short_id()
+    dest_path = PDF_DIR / f"{short_id}.pdf"
+    if dest_path.exists():
+        existing_ids.add(base_id)
+        print(f"Skipped {base_id}: PDF exists.")
+        return dest_path, None
+    if error := _attempt_download(base_id, result, dest_path, retries, timeout):
+        return None, error
+    existing_ids.add(base_id)
+    print(f"Downloaded {base_id} -> {dest_path}")
+    return dest_path, None
+
+
+def _download_by_id(
+    ids: List[str],
+    retries: int,
+    timeout: int,
+    db_path: Optional[Path] = None,
+) -> int:
     _ensure_paths()
     existing_ids = _load_id_index()
     if _should_sync_id_index():
         _sync_id_index(existing_ids)
 
-    unique_ids = _dedupe_ids(ids)
+    unique_ids = _deduped_ids(ids)
     if invalid_ids := _validate_base_ids(unique_ids):
         _report_invalid_ids(invalid_ids)
         return 1
 
-    pending_ids = [base_id for base_id in unique_ids if base_id not in existing_ids]
-    if not pending_ids:
-        for base_id in unique_ids:
-            print(f"Skipped {base_id}: already downloaded.")
+    if not (pending_ids := _collect_pending_ids(unique_ids, existing_ids)):
         return 0
 
     results = _fetch_results(pending_ids)
     failures: List[str] = []
+    metadata_rows: List[Tuple[object, ...]] = []
 
     for base_id in unique_ids:
-        if base_id in existing_ids:
-            print(f"Skipped {base_id}: already downloaded.")
-        elif (result := results.get(base_id)) is None:
-            print(f"Error: no metadata found for {base_id}.", file=sys.stderr)
-            failures.append(base_id)
-        elif not result.pdf_url:
-            print(f"Error: no PDF available for {base_id}.", file=sys.stderr)
-            failures.append(base_id)
-        else:
-            short_id = result.get_short_id()
-            dest_path = PDF_DIR / f"{short_id}.pdf"
-            if dest_path.exists():
-                print(f"Skipped {base_id}: PDF exists.")
-                existing_ids.add(base_id)
-            elif (error := _attempt_download(base_id, result, dest_path, retries, timeout)):
-                print(f"Error: {error}", file=sys.stderr)
-                failures.append(base_id)
-            else:
-                existing_ids.add(base_id)
-                print(f"Downloaded {base_id} -> {dest_path}")
+        result = results.get(base_id)
+        dest_path, error = _handle_download_result(
+            base_id,
+            result,
+            existing_ids,
+            retries,
+            timeout,
+        )
+        if error is None:
+            if db_path and dest_path and result:
+                metadata_rows.append(_metadata_row_from_result(result, dest_path))
+            continue
+        print(f"Error: {error}", file=sys.stderr)
+        failures.append(base_id)
 
     _write_id_index(existing_ids)
+    if db_path and metadata_rows:
+        _bulk_insert_metadata(db_path, metadata_rows)
+        print(f"Metadata fetched and stored for {len(metadata_rows)} papers.")
     return 1 if failures else 0
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Search and download arXiv PDFs.")
-    mode = parser.add_mutually_exclusive_group(required=True)
+    mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--query", type=str, help="Search query string.")
     mode.add_argument("--ids", nargs="+", help="One or more base arXiv IDs.")
 
@@ -291,15 +459,43 @@ def _parse_args() -> argparse.Namespace:
         default=30,
         help="Download timeout in seconds.",
     )
+    parser.add_argument(
+        "--db",
+        type=Path,
+        default=DEFAULT_DB_PATH,
+        help="SQLite DB path for metadata ingestion.",
+    )
+    parser.add_argument(
+        "--no-db",
+        action="store_true",
+        help="Disable metadata ingestion into SQLite.",
+    )
+    parser.add_argument(
+        "--backfill-db",
+        action="store_true",
+        help="Ingest metadata for existing PDFs in the data directory.",
+    )
 
     return parser.parse_args()
 
 
 def main() -> int:
     args = _parse_args()
+    db_path = None if args.no_db else args.db
+    if not (args.query or args.ids or args.backfill_db):
+        print("Error: one of --query, --ids, or --backfill-db is required.", file=sys.stderr)
+        return 2
+    if db_path and (args.ids or args.backfill_db):
+        _ensure_db(db_path)
+    if args.backfill_db:
+        return _backfill_metadata(db_path) if db_path else 2
     if args.query:
         return _search(args.query, args.max_results, args.sort)
-    return _download_by_id(args.ids, args.retries, args.timeout) if args.ids else 2
+    return (
+        _download_by_id(args.ids, args.retries, args.timeout, db_path=db_path)
+        if args.ids
+        else 2
+    )
 
 
 if __name__ == "__main__":

@@ -1,11 +1,14 @@
 import importlib.util
 import sys
 from pathlib import Path
+import sqlite3
+from datetime import datetime
 
 
 def _load_download_module():
     module_path = Path(__file__).resolve().parents[1] / "arxiv-rag" / "download.py"
     spec = importlib.util.spec_from_file_location("download", module_path)
+    assert spec is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules["download"] = module
     assert spec.loader is not None
@@ -154,3 +157,171 @@ def test_download_pdf_closes_response(tmp_path, monkeypatch):
     assert download._download_pdf(FakeResult(), dest_path, timeout=1) is None
     assert response.closed is True
     assert dest_path.exists()
+
+
+def test_download_by_id_inserts_metadata(tmp_path, monkeypatch):
+    download = _load_download_module()
+    pdf_dir = tmp_path / "arxiv-papers"
+    db_path = tmp_path / "arxiv_rag.db"
+
+    monkeypatch.setattr(download, "PDF_DIR", pdf_dir)
+    monkeypatch.setattr(download, "ID_INDEX", pdf_dir / "arxiv_ids.txt")
+
+    class FakeAuthor:
+        def __init__(self, name):
+            self.name = name
+
+    class FakeResult:
+        pdf_url = "http://example.com/test.pdf"
+        title = "Test Paper"
+        summary = "Abstract."
+        categories = ["cs.CL", "cs.AI"]
+        published = datetime(2023, 12, 18)
+        updated = datetime(2024, 1, 4)
+        authors = [FakeAuthor("Ada Lovelace"), FakeAuthor("Alan Turing")]
+        primary_category = "cs.CL"
+
+        @staticmethod
+        def get_short_id():
+            return "2311.12022v2"
+
+    def fake_fetch_results(_ids):
+        return {"2311.12022": FakeResult()}
+
+    def fake_download_pdf(_result, dest_path, _timeout, delay_seconds=None):
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        dest_path.write_bytes(b"pdf")
+        return None
+
+    monkeypatch.setattr(download, "_fetch_results", fake_fetch_results)
+    monkeypatch.setattr(download, "_download_pdf", fake_download_pdf)
+
+    exit_code = download._download_by_id(
+        ["2311.12022"],
+        retries=1,
+        timeout=1,
+        db_path=db_path,
+    )
+
+    assert exit_code == 0
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT paper_id, title, authors, abstract, categories, published_date, pdf_path, source_type "
+            "FROM papers WHERE paper_id = ?",
+            ("2311.12022",),
+        ).fetchone()
+
+    assert row is not None
+    assert row[0] == "2311.12022"
+    assert row[1] == "Test Paper"
+    assert "Ada Lovelace" in row[2]
+    assert row[3] == "Abstract."
+    assert "cs.CL" in row[4]
+    assert row[5] == "2023-12-18"
+    assert row[6].endswith("2311.12022v2.pdf")
+    assert row[7] == "arxiv"
+
+
+def test_download_by_id_no_db_skips_insert(tmp_path, monkeypatch):
+    download = _load_download_module()
+    pdf_dir = tmp_path / "arxiv-papers"
+
+    monkeypatch.setattr(download, "PDF_DIR", pdf_dir)
+    monkeypatch.setattr(download, "ID_INDEX", pdf_dir / "arxiv_ids.txt")
+
+    class FakeResult:
+        pdf_url = "http://example.com/test.pdf"
+        title = "Test Paper"
+        summary = "Abstract."
+        categories = ["cs.CL"]
+        published = datetime(2023, 12, 18)
+        updated = datetime(2024, 1, 4)
+        authors = []
+        primary_category = "cs.CL"
+
+        @staticmethod
+        def get_short_id():
+            return "2311.12022v2"
+
+    def fake_fetch_results(_ids):
+        return {"2311.12022": FakeResult()}
+
+    def fake_download_pdf(_result, dest_path, _timeout, delay_seconds=None):
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        dest_path.write_bytes(b"pdf")
+        return None
+
+    def fail_bulk_insert(*_args, **_kwargs):
+        raise AssertionError("metadata insert should be skipped when db is disabled")
+
+    monkeypatch.setattr(download, "_fetch_results", fake_fetch_results)
+    monkeypatch.setattr(download, "_download_pdf", fake_download_pdf)
+    monkeypatch.setattr(download, "_bulk_insert_metadata", fail_bulk_insert)
+
+    exit_code = download._download_by_id(
+        ["2311.12022"],
+        retries=1,
+        timeout=1,
+        db_path=None,
+    )
+
+    assert exit_code == 0
+
+
+def test_backfill_inserts_metadata_for_existing_pdfs(tmp_path, monkeypatch):
+    download = _load_download_module()
+    pdf_dir = tmp_path / "arxiv-papers"
+    pdf_dir.mkdir(parents=True)
+    (pdf_dir / "2311.12022v1.pdf").write_bytes(b"pdf")
+    db_path = tmp_path / "arxiv_rag.db"
+
+    monkeypatch.setattr(download, "PDF_DIR", pdf_dir)
+
+    class FakeAuthor:
+        def __init__(self, name):
+            self.name = name
+
+    class FakeResult:
+        pdf_url = "http://example.com/test.pdf"
+        title = "Test Paper"
+        summary = "Abstract."
+        categories = ["cs.CL", "cs.AI"]
+        published = datetime(2023, 12, 18)
+        updated = datetime(2024, 1, 4)
+        authors = [FakeAuthor("Ada Lovelace")]
+        primary_category = "cs.CL"
+
+        @staticmethod
+        def get_short_id():
+            return "2311.12022v1"
+
+    def fake_fetch_results(_ids):
+        return {"2311.12022": FakeResult()}
+
+    monkeypatch.setattr(download, "_fetch_results", fake_fetch_results)
+
+    exit_code = download._backfill_metadata(db_path)
+    assert exit_code == 0
+
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT paper_id, title FROM papers WHERE paper_id = ?",
+            ("2311.12022",),
+        ).fetchone()
+
+    assert row == ("2311.12022", "Test Paper")
+
+
+def test_backfill_no_pdfs(tmp_path, monkeypatch):
+    download = _load_download_module()
+    pdf_dir = tmp_path / "arxiv-papers"
+    db_path = tmp_path / "arxiv_rag.db"
+
+    monkeypatch.setattr(download, "PDF_DIR", pdf_dir)
+
+    def fail_fetch_results(_ids):
+        raise AssertionError("no API calls expected when there are no PDFs")
+
+    monkeypatch.setattr(download, "_fetch_results", fail_fetch_results)
+
+    assert download._backfill_metadata(db_path) == 0
