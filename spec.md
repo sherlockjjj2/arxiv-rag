@@ -847,10 +847,10 @@ def evaluate(eval_set: list[dict]) -> dict:
 
 **Goal**: End-to-end query → cited answer
 
-- [ ] Answer generation with citation prompt
-- [ ] Citation parsing and validation
-- [ ] CLI: `--verify` mode
-- [ ] Quote extraction
+- [x] Answer generation with citation prompt
+- [x] Citation parsing and validation
+- [x] CLI: `--verify` mode
+- [x] Quote extraction
 
 **Acceptance Criteria**
 

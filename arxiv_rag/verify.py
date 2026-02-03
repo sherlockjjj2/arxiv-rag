@@ -399,9 +399,9 @@ def parse_citation_quotes(answer: str) -> dict[str, str]:
     for index, match in enumerate(matches, start=1):
         window_end = matches[index].start() if index < len(matches) else len(answer)
         after = answer[match.end() : window_end]
-        quote_match = re.search(r'\*"(.*?)"\*', after, flags=re.DOTALL)
+        quote_match = re.match(r'\s*\*"(.*?)"\*', after, flags=re.DOTALL)
         if not quote_match:
-            raise ValueError(f"Missing quote after citation c{index}")
+            raise ValueError(f"Missing adjacent quote after citation c{index}")
         quote = normalize_whitespace(quote_match.group(1))
         quotes[f"c{index}"] = quote
     return quotes

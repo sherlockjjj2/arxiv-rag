@@ -10,6 +10,7 @@ from arxiv_rag.chunk_ids import compute_chunk_uid
 from arxiv_rag.db import ensure_chunks_schema, ensure_papers_schema
 from arxiv_rag.verify import (
     parse_and_validate_citations,
+    parse_citation_quotes,
     parse_citations,
     verify_answer,
 )
@@ -84,6 +85,15 @@ def test_parse_citations_rejects_page_zero() -> None:
     answer = 'Bad [arXiv:2301.01234 p.0] *"quote"*'
     with pytest.raises(ValueError):
         parse_citations(answer)
+
+
+def test_parse_citation_quotes_requires_adjacency() -> None:
+    answer = (
+        'Fact [arXiv:2301.01234 p.1] intervening text *"quote"* '
+        'More [arXiv:2301.01234 p.2] *"quote"*'
+    )
+    with pytest.raises(ValueError):
+        parse_citation_quotes(answer)
 
 
 def test_parse_and_validate_citations_success(tmp_path: Path) -> None:
