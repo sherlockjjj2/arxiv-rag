@@ -56,3 +56,15 @@ def validate_base_ids(ids: Iterable[str]) -> list[str]:
     """
 
     return [base_id for base_id in ids if not is_valid_base_id(base_id)]
+
+
+def normalize_base_id_for_lookup(base_id: str) -> str:
+    """Normalize an arXiv base ID for case-insensitive matching.
+
+    Args:
+        base_id: Base arXiv ID to normalize.
+    Returns:
+        Normalized identifier for lookup comparisons.
+    """
+
+    return base_id.lower()

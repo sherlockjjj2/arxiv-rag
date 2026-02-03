@@ -10,13 +10,17 @@ from arxiv_rag.db import ensure_chunks_schema, ensure_papers_schema
 from arxiv_rag.verify import parse_and_validate_citations, parse_citations
 
 
-def _seed_db(db_path: Path) -> None:
+def _seed_db(
+    db_path: Path,
+    *,
+    paper_id: str = "2301.01234",
+    page_number: int = 3,
+) -> None:
     with sqlite3.connect(db_path) as conn:
         ensure_papers_schema(conn, create_if_missing=True)
         ensure_chunks_schema(conn)
 
-        paper_id = "2301.01234"
-        doc_id = "doc-2301.01234"
+        doc_id = f"doc-{paper_id}"
         conn.execute(
             "INSERT INTO papers (paper_id, doc_id, title) VALUES (?, ?, ?)",
             (paper_id, doc_id, "Test Paper"),
@@ -24,7 +28,7 @@ def _seed_db(db_path: Path) -> None:
 
         chunk_uid = compute_chunk_uid(
             doc_id=doc_id,
-            page_number=3,
+            page_number=page_number,
             chunk_index=0,
             char_start=0,
             char_end=4,
@@ -44,7 +48,7 @@ def _seed_db(db_path: Path) -> None:
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (chunk_uid, paper_id, doc_id, 3, 0, "text", 0, 4, 1),
+            (chunk_uid, paper_id, doc_id, page_number, 0, "text", 0, 4, 1),
         )
         conn.commit()
 
@@ -98,3 +102,13 @@ def test_parse_and_validate_citations_missing_page(tmp_path: Path) -> None:
     answer = 'Bad [arXiv:2301.01234 p.10] *"quote"*'
     with pytest.raises(ValueError):
         parse_and_validate_citations(answer, db_path=db_path)
+
+
+def test_parse_and_validate_citations_case_insensitive_old_id(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "test.db"
+    _seed_db(db_path, paper_id="cs.DS/0101001", page_number=1)
+    answer = 'OK [arXiv:cs.ds/0101001 p.1] *"quote"*'
+    citations = parse_and_validate_citations(answer, db_path=db_path)
+    assert citations[0].paper_id == "cs.ds/0101001"

@@ -7,7 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Literal, Mapping
 
-from arxiv_rag.arxiv_ids import base_id_from_versioned, is_valid_base_id
+from arxiv_rag.arxiv_ids import (
+    base_id_from_versioned,
+    is_valid_base_id,
+    normalize_base_id_for_lookup,
+)
 from arxiv_rag.db import load_page_numbers_by_paper, load_paper_ids
 
 _ARXIV_ID_PATTERN = (
@@ -216,9 +220,22 @@ def validate_citations(
     """
 
     errors: list[VerifyError] = []
-    known_ids = set(known_paper_ids) if known_paper_ids is not None else None
+    known_ids = (
+        {normalize_base_id_for_lookup(paper_id) for paper_id in known_paper_ids}
+        if known_paper_ids is not None
+        else None
+    )
+    max_pages_norm = (
+        {
+            normalize_base_id_for_lookup(paper_id): max_pages
+            for paper_id, max_pages in max_pages_by_paper.items()
+        }
+        if max_pages_by_paper is not None
+        else None
+    )
 
     for citation in citations:
+        normalized_id = normalize_base_id_for_lookup(citation.paper_id)
         if not is_valid_base_id(citation.paper_id):
             errors.append(
                 VerifyError(
@@ -229,7 +246,7 @@ def validate_citations(
             )
             continue
 
-        if known_ids is not None and citation.paper_id not in known_ids:
+        if known_ids is not None and normalized_id not in known_ids:
             errors.append(
                 VerifyError(
                     code="unknown_paper_id",
@@ -250,8 +267,8 @@ def validate_citations(
                 )
             )
 
-        if max_pages_by_paper is not None:
-            max_pages = max_pages_by_paper.get(citation.paper_id)
+        if max_pages_norm is not None:
+            max_pages = max_pages_norm.get(normalized_id)
             if max_pages is None:
                 errors.append(
                     VerifyError(
@@ -295,15 +312,26 @@ def validate_citations_in_db(
     if not citations_list:
         return
 
-    paper_ids = {citation.paper_id for citation in citations_list}
     known_ids = load_paper_ids(db_path)
+    known_ids_by_normalized = {
+        normalize_base_id_for_lookup(paper_id): paper_id for paper_id in known_ids
+    }
+    resolved_paper_ids: set[str] = set()
     for citation in citations_list:
-        if citation.paper_id not in known_ids:
+        normalized_id = normalize_base_id_for_lookup(citation.paper_id)
+        stored_id = known_ids_by_normalized.get(normalized_id)
+        if stored_id is None:
             raise ValueError(f"Unknown arXiv ID: {citation.paper_id}")
+        resolved_paper_ids.add(stored_id)
 
-    pages_by_paper = load_page_numbers_by_paper(db_path, sorted(paper_ids))
+    pages_by_paper = load_page_numbers_by_paper(db_path, sorted(resolved_paper_ids))
+    pages_by_paper_normalized = {
+        normalize_base_id_for_lookup(paper_id): pages
+        for paper_id, pages in pages_by_paper.items()
+    }
     for citation in citations_list:
-        pages = pages_by_paper.get(citation.paper_id, set())
+        normalized_id = normalize_base_id_for_lookup(citation.paper_id)
+        pages = pages_by_paper_normalized.get(normalized_id, set())
         if citation.page_number not in pages:
             raise ValueError(
                 "Missing page "
