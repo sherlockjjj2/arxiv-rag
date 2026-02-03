@@ -243,6 +243,7 @@ uv run python -m arxiv_rag.cli inspect --db data/arxiv_rag.db
 - Embeddings use OpenAI (`text-embedding-3-small` default) with retries and token-aware batching; stored in SQLite for fallback retrieval.
 - Vector search uses local Chroma collections; hybrid retrieval uses RRF fusion with optional fallback to SQLite embeddings.
 - CLI supports answer generation with citation prompts via `--generate`; citation verification is not implemented yet.
+- Citation prompt templates live under `arxiv_rag/prompts/` and are bundled with the package.
 
 ## Features
 

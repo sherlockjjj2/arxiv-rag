@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from importlib import resources
 from pathlib import Path
 from typing import Sequence
 
@@ -165,14 +166,41 @@ def load_prompt_template(path: Path | None = None) -> str:
         ValueError: If the prompt template is empty.
     """
 
-    prompt_path = path or _DEFAULT_PROMPT_PATH
-    if not prompt_path.exists():
-        raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
-
-    template = prompt_path.read_text(encoding="utf-8")
+    if path is not None:
+        prompt_path = path
+        if not prompt_path.exists():
+            raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
+        template = prompt_path.read_text(encoding="utf-8")
+    else:
+        template = _load_packaged_prompt_template()
+        if template is None:
+            prompt_path = _DEFAULT_PROMPT_PATH
+            if not prompt_path.exists():
+                raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
+            template = prompt_path.read_text(encoding="utf-8")
     if not template.strip():
-        raise ValueError(f"Prompt template is empty: {prompt_path}")
+        location = path or _DEFAULT_PROMPT_PATH
+        raise ValueError(f"Prompt template is empty: {location}")
     return template
+
+
+def _load_packaged_prompt_template() -> str | None:
+    """Load the prompt template from package resources.
+
+    Returns:
+        Prompt template string if found, otherwise None.
+    """
+
+    try:
+        resource = resources.files("arxiv_rag").joinpath(
+            "prompts",
+            "generate_with_citations.txt",
+        )
+        if resource.is_file():
+            return resource.read_text(encoding="utf-8")
+    except (FileNotFoundError, ModuleNotFoundError, AttributeError):
+        return None
+    return None
 
 
 def validate_chunks(chunks: Sequence[Chunk]) -> None:

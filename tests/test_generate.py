@@ -44,6 +44,20 @@ def test_load_prompt_template_raises_on_empty(tmp_path: Path) -> None:
         generate.load_prompt_template(empty_path)
 
 
+def test_load_prompt_template_uses_resources_when_default_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    generate, _, _ = _load_generate()
+    missing_path = tmp_path / "missing.txt"
+
+    monkeypatch.setattr(generate, "_DEFAULT_PROMPT_PATH", missing_path)
+
+    template = generate.load_prompt_template()
+
+    assert "{chunks}" in template
+
+
 def test_render_prompt_requires_placeholder() -> None:
     generate, _, _ = _load_generate()
 
