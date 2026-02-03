@@ -37,65 +37,43 @@ def main(ctx: typer.Context) -> None:
         typer.echo(ctx.get_help())
 
 
-@app.command()
-def query(
+def _run_query(
+    *,
     question: str,
-    top_k: int = typer.Option(5, help="Number of chunks to return."),
-    mode: Literal["fts", "vector", "hybrid"] = typer.Option(
-        "fts",
-        help="Retrieval mode.",
-    ),
-    model: str = typer.Option(
-        "text-embedding-3-small",
-        help="Embedding model for vector search.",
-    ),
-    db: Path = typer.Option(
-        Path("data/arxiv_rag.db"),
-        help="SQLite database path.",
-        exists=False,
-        dir_okay=False,
-    ),
-    chroma_dir: Path = typer.Option(
-        Path("data/chroma"),
-        envvar="CHROMA_DIR",
-        help="Chroma persistence directory.",
-    ),
-    collection: str = typer.Option(
-        "arxiv_chunks_te3s_v1",
-        envvar="CHROMA_COLLECTION",
-        help="Chroma collection name.",
-    ),
-    distance: Literal["cosine", "l2", "ip"] = typer.Option(
-        "cosine",
-        envvar="CHROMA_DISTANCE",
-        help="Chroma distance metric.",
-    ),
-    snippet_chars: int = typer.Option(
-        240,
-        help="Maximum characters to display per snippet.",
-    ),
-    show_score: bool = typer.Option(
-        False,
-        help="Include score in the output.",
-    ),
-    verbose: bool = typer.Option(
-        False,
-        help="Show retrieval details.",
-    ),
-    rrf_k: int = typer.Option(
-        60,
-        help="RRF constant for hybrid fusion.",
-    ),
-    rrf_weight_fts: float = typer.Option(
-        1.0,
-        help="RRF weight for FTS results.",
-    ),
-    rrf_weight_vector: float = typer.Option(
-        1.0,
-        help="RRF weight for vector results.",
-    ),
+    top_k: int,
+    mode: Literal["fts", "vector", "hybrid"],
+    model: str,
+    db: Path,
+    chroma_dir: Path,
+    collection: str,
+    distance: Literal["cosine", "l2", "ip"],
+    snippet_chars: int,
+    show_score: bool,
+    verbose: bool,
+    rrf_k: int,
+    rrf_weight_fts: float,
+    rrf_weight_vector: float,
 ) -> None:
-    """Query SQLite for matching chunks via FTS, vector, or hybrid retrieval."""
+    """Run a retrieval query and print results to stdout.
+
+    Args:
+        question: Query string to retrieve chunks for.
+        top_k: Number of chunks to return.
+        mode: Retrieval backend to use.
+        model: Embedding model name.
+        db: SQLite database path.
+        chroma_dir: Chroma persistence directory.
+        collection: Chroma collection name.
+        distance: Chroma distance metric.
+        snippet_chars: Maximum characters to display per snippet.
+        show_score: Whether to include backend scores in the output.
+        verbose: Whether to print retrieval provenance details.
+        rrf_k: RRF constant for hybrid fusion.
+        rrf_weight_fts: RRF weight for FTS results.
+        rrf_weight_vector: RRF weight for vector results.
+    Raises:
+        typer.Exit: If validation fails or retrieval errors occur.
+    """
 
     if snippet_chars <= 0:
         typer.echo("snippet_chars must be > 0", err=True)
@@ -190,6 +168,154 @@ def query(
                 typer.echo(f"  score={result.score:.6f}")
         if index < len(results) - 1:
             typer.echo()
+
+
+@app.command()
+def query(
+    question: str,
+    top_k: int = typer.Option(5, help="Number of chunks to return."),
+    mode: Literal["fts", "vector", "hybrid"] = typer.Option(
+        "fts",
+        help="Retrieval mode.",
+    ),
+    model: str = typer.Option(
+        "text-embedding-3-small",
+        help="Embedding model for vector search.",
+    ),
+    db: Path = typer.Option(
+        Path("data/arxiv_rag.db"),
+        help="SQLite database path.",
+        exists=False,
+        dir_okay=False,
+    ),
+    chroma_dir: Path = typer.Option(
+        Path("data/chroma"),
+        envvar="CHROMA_DIR",
+        help="Chroma persistence directory.",
+    ),
+    collection: str = typer.Option(
+        "arxiv_chunks_te3s_v1",
+        envvar="CHROMA_COLLECTION",
+        help="Chroma collection name.",
+    ),
+    distance: Literal["cosine", "l2", "ip"] = typer.Option(
+        "cosine",
+        envvar="CHROMA_DISTANCE",
+        help="Chroma distance metric.",
+    ),
+    snippet_chars: int = typer.Option(
+        240,
+        help="Maximum characters to display per snippet.",
+    ),
+    show_score: bool = typer.Option(
+        False,
+        help="Include score in the output.",
+    ),
+    verbose: bool = typer.Option(
+        False,
+        help="Show retrieval details.",
+    ),
+    rrf_k: int = typer.Option(
+        60,
+        help="RRF constant for hybrid fusion.",
+    ),
+    rrf_weight_fts: float = typer.Option(
+        1.0,
+        help="RRF weight for FTS results.",
+    ),
+    rrf_weight_vector: float = typer.Option(
+        1.0,
+        help="RRF weight for vector results.",
+    ),
+) -> None:
+    """Query SQLite for matching chunks via FTS, vector, or hybrid retrieval."""
+
+    _run_query(
+        question=question,
+        top_k=top_k,
+        mode=mode,
+        model=model,
+        db=db,
+        chroma_dir=chroma_dir,
+        collection=collection,
+        distance=distance,
+        snippet_chars=snippet_chars,
+        show_score=show_score,
+        verbose=verbose,
+        rrf_k=rrf_k,
+        rrf_weight_fts=rrf_weight_fts,
+        rrf_weight_vector=rrf_weight_vector,
+    )
+
+
+@app.command()
+def sources(
+    question: str,
+    top_k: int = typer.Option(5, help="Number of chunks to return."),
+    model: str = typer.Option(
+        "text-embedding-3-small",
+        help="Embedding model for vector search.",
+    ),
+    db: Path = typer.Option(
+        Path("data/arxiv_rag.db"),
+        help="SQLite database path.",
+        exists=False,
+        dir_okay=False,
+    ),
+    chroma_dir: Path = typer.Option(
+        Path("data/chroma"),
+        envvar="CHROMA_DIR",
+        help="Chroma persistence directory.",
+    ),
+    collection: str = typer.Option(
+        "arxiv_chunks_te3s_v1",
+        envvar="CHROMA_COLLECTION",
+        help="Chroma collection name.",
+    ),
+    distance: Literal["cosine", "l2", "ip"] = typer.Option(
+        "cosine",
+        envvar="CHROMA_DISTANCE",
+        help="Chroma distance metric.",
+    ),
+    snippet_chars: int = typer.Option(
+        240,
+        help="Maximum characters to display per snippet.",
+    ),
+    show_score: bool = typer.Option(
+        False,
+        help="Include score in the output.",
+    ),
+    rrf_k: int = typer.Option(
+        60,
+        help="RRF constant for hybrid fusion.",
+    ),
+    rrf_weight_fts: float = typer.Option(
+        1.0,
+        help="RRF weight for FTS results.",
+    ),
+    rrf_weight_vector: float = typer.Option(
+        1.0,
+        help="RRF weight for vector results.",
+    ),
+) -> None:
+    """Alias for hybrid retrieval with verbose provenance output."""
+
+    _run_query(
+        question=question,
+        top_k=top_k,
+        mode="hybrid",
+        model=model,
+        db=db,
+        chroma_dir=chroma_dir,
+        collection=collection,
+        distance=distance,
+        snippet_chars=snippet_chars,
+        show_score=show_score,
+        verbose=True,
+        rrf_k=rrf_k,
+        rrf_weight_fts=rrf_weight_fts,
+        rrf_weight_vector=rrf_weight_vector,
+    )
 
 
 @dataclass(frozen=True)
