@@ -440,9 +440,7 @@ def search_hybrid(
         try:
             query_embedding = embeddings_client.embed([question]).embeddings[0]
         except Exception as exc:  # pragma: no cover - defensive for API failures
-            warnings.append(
-                f"Embedding failed ({exc}); skipping vector search."
-            )
+            warnings.append(f"Embedding failed ({exc}); skipping vector search.")
             query_embedding = None
 
         if query_embedding is not None:

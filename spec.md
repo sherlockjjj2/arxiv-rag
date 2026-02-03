@@ -615,7 +615,7 @@ def sources(question: str, top_k: int = 5):
 
 ### Verify
 
-`--verify` validates citations and quotes for a generated answer. It is deterministic by default, with an optional LLM-judge for semantic agreement.
+`--verify` validates citations and quotes for a generated answer. Deterministic checks run by default; optional LLM-judge covers semantic agreement.
 
 **Deterministic checks**
 
@@ -623,15 +623,8 @@ def sources(question: str, top_k: int = 5):
 - Validate citation syntax and resolve IDs via `arxiv_ids` helpers.
 - Resolve each citation to a known `paper_id` and `page_number` in the database.
 - Verify each quote is a verbatim substring of the cited page text after whitespace normalization.
-- Enforce coverage: at least one citation per declarative sentence (configurable).
-- Report errors with sentence indices and citation IDs for fast debugging.
-
-**Optional LLM-judge (advisory)**
-
-- Input: sentence text, citations, and the exact supporting quotes plus short source snippets.
-- Output: strict JSON verdict with `pass|fail|uncertain`, `confidence`, and `reasons`.
-- Default behavior: advisory only. Deterministic failures always fail verification.
-- Strict mode: `--judge-strict` fails the run on judge `fail`.
+- Enforce coverage: at least one citation per paragraph (configurable).
+- Report errors with paragraph indices and citation IDs for fast debugging.
 
 **Schema draft**
 
@@ -665,6 +658,13 @@ Verify report:
         "confidence": 0.78,
         "reasons": []
       }
+    }
+  ],
+  "paragraphs": [
+    {
+      "paragraph_index": 0,
+      "text": "Dense retrieval encodes queries and documents into dense vectors.",
+      "citations": ["c1"]
     }
   ],
   "citations": []
@@ -854,12 +854,11 @@ def evaluate(eval_set: list[dict]) -> dict:
 
 **Acceptance Criteria**
 
-- Every declarative sentence in the answer includes at least one citation in `[arXiv:ID p.N]` format.
+- Every paragraph in the answer includes at least one citation in `[arXiv:ID p.N]` format.
 - Each citation resolves to a known `paper_id` and a valid `page_number` in the database.
 - Every citation has a supporting quote snippet that is a verbatim match to the cited page text (after whitespace normalization).
 - Citation parsing produces structured records (see Verify schema draft) and fails fast on malformed or unresolved citations.
 - `--verify` runs deterministic checks and returns exit codes: `0` pass, `1` validation failure, `2` system error.
-- Optional LLM-judge runs only after deterministic checks, cannot override deterministic failures, and records an advisory verdict.
 
 **Deliverable**: Full answers with `[arXiv:ID p.N]` citations and supporting quotes
 

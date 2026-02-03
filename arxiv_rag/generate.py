@@ -221,7 +221,9 @@ def validate_chunks(chunks: Sequence[Chunk]) -> None:
         if not chunk.chunk_uid:
             raise ValueError(f"Chunk {index} missing chunk_uid")
         if chunk.page_number <= 0:
-            raise ValueError(f"Chunk {index} has invalid page_number={chunk.page_number}")
+            raise ValueError(
+                f"Chunk {index} has invalid page_number={chunk.page_number}"
+            )
         if not chunk.text.strip():
             raise ValueError(f"Chunk {index} missing text")
 

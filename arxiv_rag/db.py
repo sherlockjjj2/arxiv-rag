@@ -8,6 +8,7 @@ from math import sqrt
 from pathlib import Path
 from typing import Sequence
 
+from arxiv_rag.arxiv_ids import normalize_base_id_for_lookup
 from arxiv_rag.chunk_ids import compute_chunk_uid
 
 _PAPERS_TABLE_SQL = """
@@ -214,11 +215,7 @@ def load_page_numbers_by_paper(
         return {}
 
     placeholders = ", ".join("?" for _ in unique_ids)
-    sql = (
-        "SELECT paper_id, page_number "
-        "FROM chunks "
-        f"WHERE paper_id IN ({placeholders})"
-    )
+    sql = f"SELECT paper_id, page_number FROM chunks WHERE paper_id IN ({placeholders})"
 
     pages_by_paper: dict[str, set[int]] = {paper_id: set() for paper_id in unique_ids}
     with sqlite3.connect(db_path) as conn:
@@ -228,6 +225,49 @@ def load_page_numbers_by_paper(
         pages_by_paper.setdefault(paper_id, set()).add(page_number)
 
     return pages_by_paper
+
+
+def load_paper_pdf_paths(
+    db_path: Path,
+    paper_ids: Sequence[str],
+) -> dict[str, Path]:
+    """Load pdf_path values for the provided paper IDs.
+
+    Args:
+        db_path: SQLite database path.
+        paper_ids: Paper IDs to filter the lookup.
+    Returns:
+        Mapping from normalized paper_id to PDF path.
+    Raises:
+        FileNotFoundError: If the database path does not exist.
+        sqlite3.Error: If the query fails.
+    """
+
+    if not db_path.exists():
+        raise FileNotFoundError(f"Database not found: {db_path}")
+
+    unique_ids = sorted({paper_id for paper_id in paper_ids if paper_id})
+    if not unique_ids:
+        return {}
+
+    placeholders = ", ".join("?" for _ in unique_ids)
+    normalized_ids = [normalize_base_id_for_lookup(paper_id) for paper_id in unique_ids]
+    sql = (
+        "SELECT paper_id, pdf_path "
+        "FROM papers "
+        f"WHERE lower(paper_id) IN ({placeholders})"
+    )
+
+    paths_by_id: dict[str, Path] = {}
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(sql, normalized_ids).fetchall()
+
+    for paper_id, pdf_path in rows:
+        if not pdf_path:
+            continue
+        paths_by_id[normalize_base_id_for_lookup(paper_id)] = Path(pdf_path)
+
+    return paths_by_id
 
 
 def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:

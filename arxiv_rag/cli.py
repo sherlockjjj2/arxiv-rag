@@ -28,6 +28,7 @@ from arxiv_rag.retrieve import (
     search_hybrid,
     search_vector_chroma,
 )
+from arxiv_rag.verify import verify_answer
 
 app = typer.Typer(help="CLI for arXiv RAG utilities.")
 
@@ -117,14 +118,14 @@ def _run_query(
         typer.echo(line)
         if verbose:
             if mode == "hybrid":
-                backends = "+".join(sorted({prov.backend for prov in result.provenance}))
+                backends = "+".join(
+                    sorted({prov.backend for prov in result.provenance})
+                )
                 typer.echo(f"  sources={backends}")
                 typer.echo(f"  rrf_total={result.rrf_score:.6f}")
                 for prov in result.provenance:
                     raw_value = (
-                        "n/a"
-                        if prov.raw_score is None
-                        else f"{prov.raw_score:.6f}"
+                        "n/a" if prov.raw_score is None else f"{prov.raw_score:.6f}"
                     )
                     typer.echo(
                         "  "
@@ -285,6 +286,14 @@ def query(
         "gpt-4o-mini",
         help="Model for answer generation.",
     ),
+    verify: bool = typer.Option(
+        False,
+        help="Verify citations and quotes in the generated answer.",
+    ),
+    parsed_dir: Path = typer.Option(
+        Path("data/parsed"),
+        help="Directory containing parsed JSON files for quote validation.",
+    ),
     show_score: bool = typer.Option(
         False,
         help="Include score in the output.",
@@ -307,6 +316,10 @@ def query(
     ),
 ) -> None:
     """Query SQLite for matching chunks via FTS, vector, or hybrid retrieval."""
+
+    if verify and not generate:
+        typer.echo("--verify requires --generate.", err=True)
+        raise typer.Exit(code=1)
 
     if generate:
         results, warnings = _run_retrieval(
@@ -359,6 +372,41 @@ def query(
             raise typer.Exit(code=2) from exc
 
         typer.echo(answer)
+
+        if verify:
+            try:
+                report = verify_answer(
+                    answer,
+                    db_path=db,
+                    parsed_dir=parsed_dir,
+                )
+            except FileNotFoundError as exc:
+                typer.echo(str(exc), err=True)
+                raise typer.Exit(code=2) from exc
+            except sqlite3.Error as exc:
+                typer.echo(f"SQLite error: {exc}", err=True)
+                raise typer.Exit(code=2) from exc
+            except OSError as exc:
+                typer.echo(str(exc), err=True)
+                raise typer.Exit(code=2) from exc
+
+            typer.echo("\nVerification report:")
+            if not report.errors:
+                typer.echo("  pass")
+            else:
+                for error in report.errors:
+                    suffix = []
+                    if error.citation_id:
+                        suffix.append(f"citation={error.citation_id}")
+                    if error.sentence_index is not None:
+                        suffix.append(f"sentence={error.sentence_index}")
+                    if error.paragraph_index is not None:
+                        suffix.append(f"paragraph={error.paragraph_index}")
+                    details = f" ({', '.join(suffix)})" if suffix else ""
+                    typer.echo(f"  {error.code}: {error.message}{details}")
+
+            if report.status != "pass":
+                raise typer.Exit(code=1)
         return
 
     _run_query(
