@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import sqlite3
+from array import array
+from math import sqrt
 from pathlib import Path
+from typing import Sequence
 
 from arxiv_rag.chunk_ids import compute_chunk_uid
 
@@ -173,3 +176,67 @@ def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
         (table_name,),
     ).fetchone()
     return row is not None
+
+
+def normalize_embedding(vector: Sequence[float]) -> list[float]:
+    """Normalize an embedding vector to unit length.
+
+    Args:
+        vector: Embedding values.
+    Returns:
+        Normalized vector as a list of floats.
+    Raises:
+        ValueError: If the vector is empty.
+    """
+
+    if not vector:
+        raise ValueError("embedding vector must be non-empty")
+
+    norm = sqrt(sum(value * value for value in vector))
+    if norm == 0:
+        return [0.0 for _ in vector]
+    return [float(value) / norm for value in vector]
+
+
+def serialize_embedding(vector: Sequence[float]) -> bytes:
+    """Serialize an embedding vector as float32 bytes.
+
+    Args:
+        vector: Embedding values (ideally normalized already).
+    Returns:
+        Bytes representation of the float32 array.
+    Raises:
+        ValueError: If the vector is empty.
+    """
+
+    if not vector:
+        raise ValueError("embedding vector must be non-empty")
+    return array("f", vector).tobytes()
+
+
+def deserialize_embedding(blob: bytes) -> list[float]:
+    """Deserialize float32 bytes into an embedding vector.
+
+    Args:
+        blob: Raw bytes from SQLite.
+    Returns:
+        Embedding vector as a list of floats.
+    """
+
+    values = array("f")
+    values.frombytes(blob)
+    return list(values)
+
+
+def deserialize_embedding_array(blob: bytes) -> array:
+    """Deserialize float32 bytes into an array('f') embedding.
+
+    Args:
+        blob: Raw bytes from SQLite.
+    Returns:
+        Embedding array for efficient numeric operations.
+    """
+
+    values = array("f")
+    values.frombytes(blob)
+    return values

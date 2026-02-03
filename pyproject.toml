@@ -6,9 +6,13 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "arxiv>=2.1.0",
+    "httpx[socks]>=0.28.1",
+    "openai>=1.58.1",
     "pymupdf>=1.23",
+    "python-dotenv>=1.0.1",
     "requests>=2.32.5",
     "rich>=14.3.2",
+    "tenacity>=8.2.3",
     "tiktoken>=0.11.0",
     "typer>=0.12.3",
 ]
