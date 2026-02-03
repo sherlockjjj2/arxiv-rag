@@ -8,8 +8,9 @@ import sqlite3
 from array import array
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Iterable, Mapping, Sequence
 
+from arxiv_rag.chroma_client import ChromaConfig, ChromaStore
 from arxiv_rag.db import deserialize_embedding_array, normalize_embedding
 from arxiv_rag.embeddings_client import EmbeddingsClient
 
@@ -151,6 +152,100 @@ def search_vector(
         top_k=top_k,
         db_path=db_path,
     )
+
+
+def search_vector_chroma(
+    question: str,
+    *,
+    top_k: int,
+    db_path: Path,
+    embeddings_client: EmbeddingsClient,
+    chroma_config: ChromaConfig,
+    chroma_store: ChromaStore | None = None,
+) -> list[ChunkResult]:
+    """Search chunks by cosine similarity using Chroma.
+
+    Args:
+        question: Query text.
+        top_k: Number of results to return.
+        db_path: Path to the SQLite database.
+        embeddings_client: Client for query embeddings.
+        chroma_config: Chroma configuration.
+        chroma_store: Optional store override for testing.
+    Returns:
+        List of ChunkResult rows ordered by Chroma distance.
+    Raises:
+        FileNotFoundError: When the database path does not exist.
+        ValueError: When top_k is not positive.
+        sqlite3.Error: When SQLite operations fail.
+    """
+
+    if top_k <= 0:
+        raise ValueError("top_k must be > 0")
+    if not db_path.exists():
+        raise FileNotFoundError(f"Database not found: {db_path}")
+
+    query_embedding = embeddings_client.embed([question]).embeddings[0]
+    normalized_query = normalize_embedding(query_embedding)
+    store = chroma_store or ChromaStore(chroma_config)
+    ids, distances = store.query(
+        query_embeddings=[normalized_query],
+        top_k=top_k,
+    )
+    if not ids:
+        return []
+
+    scores_by_uid = {
+        uid: distances[index]
+        for index, uid in enumerate(ids)
+        if index < len(distances)
+    }
+    with sqlite3.connect(db_path) as conn:
+        return load_chunks_by_uid(conn, ids, scores_by_uid)
+
+
+def load_chunks_by_uid(
+    conn: sqlite3.Connection,
+    chunk_uids: Sequence[str],
+    scores_by_uid: Mapping[str, float] | None = None,
+) -> list[ChunkResult]:
+    """Load chunk rows for a set of chunk_uids, preserving order.
+
+    Args:
+        conn: SQLite connection.
+        chunk_uids: Chunk UID values to load.
+        scores_by_uid: Optional map of scores to attach.
+    Returns:
+        List of ChunkResult entries in chunk_uids order.
+    """
+
+    if not chunk_uids:
+        return []
+
+    placeholders = ", ".join("?" for _ in chunk_uids)
+    sql = f"""
+        SELECT chunk_uid, chunk_id, paper_id, page_number, text
+        FROM chunks
+        WHERE chunk_uid IN ({placeholders})
+    """
+    rows = conn.execute(sql, list(chunk_uids)).fetchall()
+    by_uid = {
+        row[0]: ChunkResult(
+            chunk_uid=row[0],
+            chunk_id=row[1],
+            paper_id=row[2],
+            page_number=row[3],
+            text=row[4],
+            score=(scores_by_uid or {}).get(row[0]),
+        )
+        for row in rows
+    }
+
+    ordered: list[ChunkResult] = []
+    for uid in chunk_uids:
+        if uid in by_uid:
+            ordered.append(by_uid[uid])
+    return ordered
 
 
 def search_vector_with_embedding(

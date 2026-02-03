@@ -245,11 +245,10 @@ def _resolve_paper_id(
         return explicit_paper_id
 
     if conn is not None and parsed_doc.pdf_path is not None:
-        row = conn.execute(
+        if row := conn.execute(
             "SELECT paper_id FROM papers WHERE pdf_path = ?",
             (str(parsed_doc.pdf_path),),
-        ).fetchone()
-        if row:
+        ).fetchone():
             return row[0]
 
         rows = conn.execute(
@@ -259,8 +258,7 @@ def _resolve_paper_id(
         if len(rows) == 1:
             return rows[0][0]
 
-    inferred = _infer_paper_id(parsed_doc, parsed_path)
-    if inferred:
+    if inferred := _infer_paper_id(parsed_doc, parsed_path):
         return inferred
 
     raise ValueError(

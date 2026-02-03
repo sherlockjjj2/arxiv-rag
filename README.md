@@ -19,6 +19,14 @@ Install dependencies (creates a local `.venv`):
 uv sync
 ```
 
+Optional vector dependencies (Chroma):
+
+```bash
+uv sync --extra vector
+```
+
+Note: Chroma depends on `onnxruntime` wheels; Python 3.13 is recommended (3.14 may not be supported yet).
+
 ## Quickstart
 
 1. Search arXiv for IDs (no downloads):
@@ -45,10 +53,10 @@ uv run python arxiv_rag/parse.py --pdf data/arxiv-papers/2301.12345v1.pdf
 uv run python arxiv_rag/chunk.py --parsed data/parsed/2301.12345v1.json --db data/arxiv_rag.db
 ```
 
-5. Generate embeddings:
+5. Index embeddings into Chroma:
 
 ```bash
-uv run arxiv-rag embed --db data/arxiv_rag.db
+uv run arxiv-rag index --db data/arxiv_rag.db
 ```
 
 6. Query the BM25 index:
@@ -57,7 +65,7 @@ uv run arxiv-rag embed --db data/arxiv_rag.db
 uv run arxiv-rag query "dense retrieval" --top-k 5
 ```
 
-7. Query vector embeddings:
+7. Query vector embeddings (Chroma):
 
 ```bash
 uv run arxiv-rag query "dense retrieval" --top-k 5 --mode vector
@@ -148,10 +156,24 @@ uv run arxiv-rag query "dense retrieval" --show-score
 uv run arxiv-rag embed --db data/arxiv_rag.db
 ```
 
-### Query vector embeddings
+Note: this stores embeddings in SQLite for the legacy in-memory vector search path.
+
+### Index embeddings into Chroma
+
+```bash
+uv run arxiv-rag index --db data/arxiv_rag.db
+```
+
+### Query vector embeddings (Chroma)
 
 ```bash
 uv run arxiv-rag query "dense retrieval" --mode vector --top-k 5
+```
+
+### Inspect Chroma counts
+
+```bash
+uv run arxiv-rag inspect --db data/arxiv_rag.db
 ```
 
 ## Data locations
@@ -160,13 +182,14 @@ uv run arxiv-rag query "dense retrieval" --mode vector --top-k 5
 - ID index: `data/arxiv-papers/arxiv_ids.txt`
 - Parsed JSON: `data/parsed/`
 - SQLite DB: `data/arxiv_rag.db`
+- Chroma persistence: `data/chroma/`
 
 ## Notes
 
 ### 2026-02-03
 
 - Current implementation is CLI-only: download/search arXiv, parse PDFs, chunk into SQLite, and query via FTS5 (BM25).
-- Embeddings are now generated locally and stored in SQLite for in-memory cosine retrieval.
+- Embeddings are generated and indexed into Chroma for vector search; SQLite remains the source of chunk text.
 - No LLM answer generation or citation verification is implemented.
 - Query logging is not implemented.
 - Spec now defines a canonical `chunk_uid` for cross-index joins (SQLite ↔ vector DB).
