@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -44,7 +45,7 @@ def test_load_prompt_template_raises_on_empty(tmp_path: Path) -> None:
         generate.load_prompt_template(empty_path)
 
 
-def test_load_prompt_template_uses_resources_when_default_missing(
+def test_load_prompt_template_prefers_packaged_resource(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -52,10 +53,41 @@ def test_load_prompt_template_uses_resources_when_default_missing(
     missing_path = tmp_path / "missing.txt"
 
     monkeypatch.setattr(generate, "_DEFAULT_PROMPT_PATH", missing_path)
+    monkeypatch.setattr(generate, "_load_packaged_prompt_template", lambda: "P\n{chunks}")
 
     template = generate.load_prompt_template()
 
-    assert "{chunks}" in template
+    assert template == "P\n{chunks}"
+
+
+def test_load_prompt_template_falls_back_to_default_when_resources_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    generate, _, _ = _load_generate()
+    prompt_path = tmp_path / "prompt.txt"
+    prompt_path.write_text("Prompt {chunks}", encoding="utf-8")
+
+    monkeypatch.setattr(generate, "_load_packaged_prompt_template", lambda: None)
+    monkeypatch.setattr(generate, "_DEFAULT_PROMPT_PATH", prompt_path)
+
+    template = generate.load_prompt_template()
+
+    assert template == "Prompt {chunks}"
+
+
+def test_prompt_template_included_in_package_data() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    pyproject = tomllib.loads(
+        (repo_root / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    package_data = (
+        pyproject.get("tool", {})
+        .get("setuptools", {})
+        .get("package-data", {})
+    )
+
+    assert "prompts/*.txt" in package_data.get("arxiv_rag", [])
 
 
 def test_render_prompt_requires_placeholder() -> None:
