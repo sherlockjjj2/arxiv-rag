@@ -8,11 +8,39 @@ import sqlite3
 from array import array
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence
+from typing import Iterable, Literal, Mapping, Sequence
 
 from arxiv_rag.chroma_client import ChromaConfig, ChromaStore
 from arxiv_rag.db import deserialize_embedding_array, normalize_embedding
 from arxiv_rag.embeddings_client import EmbeddingsClient
+
+_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "by",
+    "for",
+    "from",
+    "how",
+    "in",
+    "is",
+    "it",
+    "of",
+    "on",
+    "or",
+    "that",
+    "the",
+    "this",
+    "to",
+    "was",
+    "what",
+    "which",
+    "with",
+}
 
 
 @dataclass(frozen=True)
@@ -27,19 +55,76 @@ class ChunkResult:
     score: float | None = None
 
 
+@dataclass(frozen=True)
+class BackendProvenance:
+    """Per-backend contribution to a hybrid retrieval result.
+
+    Args:
+        backend: Backend identifier.
+        rank: 1-based rank within the backend results.
+        raw_score: Raw backend score or distance (lower is better).
+        normalized_score: Rank-normalized score for display (higher is better).
+        rrf_contribution: Contribution to the RRF score.
+    """
+
+    backend: Literal["fts", "vector"]
+    rank: int
+    raw_score: float | None
+    normalized_score: float
+    rrf_contribution: float
+
+
+@dataclass(frozen=True)
+class HybridChunkResult:
+    """Hybrid retrieval result with RRF score and provenance."""
+
+    chunk_uid: str
+    chunk_id: int
+    paper_id: str
+    page_number: int
+    text: str
+    rrf_score: float
+    provenance: Sequence[BackendProvenance]
+
+
+@dataclass(frozen=True)
+class HybridSearchOutput:
+    """Hybrid search output with warnings."""
+
+    results: list[HybridChunkResult]
+    warnings: list[str]
+
+
 def build_fts_query(question: str) -> str:
-    """Build an AND-joined FTS query from the question text.
+    """Build a relaxed FTS query from the question text.
 
     Args:
         question: Raw user query string.
     Returns:
-        FTS query string with terms joined by AND.
+        FTS query string mixing AND/OR based on term importance.
     Edge cases:
         Returns an empty string when no tokens are present.
     """
 
     tokens = [token for token in re.split(r"\s+", question.strip()) if token]
-    return " AND ".join(tokens)
+    if not tokens:
+        return ""
+
+    filtered = [token for token in tokens if token.lower() not in _STOPWORDS]
+    if not filtered:
+        return ""
+
+    important = [token for token in filtered if len(token) >= 6]
+    common = [token for token in filtered if token not in important]
+
+    if important:
+        required = " AND ".join(important)
+        if common:
+            optional = " OR ".join(common)
+            return f"({required}) AND ({optional})"
+        return required
+
+    return " OR ".join(common)
 
 
 def format_snippet(text: str, max_chars: int) -> str:
@@ -187,6 +272,44 @@ def search_vector_chroma(
         raise FileNotFoundError(f"Database not found: {db_path}")
 
     query_embedding = embeddings_client.embed([question]).embeddings[0]
+    return search_vector_chroma_with_embedding(
+        query_embedding,
+        top_k=top_k,
+        db_path=db_path,
+        chroma_config=chroma_config,
+        chroma_store=chroma_store,
+    )
+
+
+def search_vector_chroma_with_embedding(
+    query_embedding: Sequence[float],
+    *,
+    top_k: int,
+    db_path: Path,
+    chroma_config: ChromaConfig,
+    chroma_store: ChromaStore | None = None,
+) -> list[ChunkResult]:
+    """Search chunks by cosine similarity using Chroma and a provided embedding.
+
+    Args:
+        query_embedding: Pre-computed query embedding.
+        top_k: Number of results to return.
+        db_path: Path to the SQLite database.
+        chroma_config: Chroma configuration.
+        chroma_store: Optional store override for testing.
+    Returns:
+        List of ChunkResult rows ordered by Chroma distance.
+    Raises:
+        FileNotFoundError: When the database path does not exist.
+        ValueError: When top_k is not positive.
+        sqlite3.Error: When SQLite operations fail.
+    """
+
+    if top_k <= 0:
+        raise ValueError("top_k must be > 0")
+    if not db_path.exists():
+        raise FileNotFoundError(f"Database not found: {db_path}")
+
     normalized_query = normalize_embedding(query_embedding)
     store = chroma_store or ChromaStore(chroma_config)
     ids, distances = store.query(
@@ -245,6 +368,123 @@ def load_chunks_by_uid(
         if uid in by_uid:
             ordered.append(by_uid[uid])
     return ordered
+
+
+def search_hybrid(
+    question: str,
+    *,
+    top_k: int,
+    db_path: Path,
+    embeddings_client: EmbeddingsClient,
+    chroma_config: ChromaConfig,
+    chroma_store: ChromaStore | None = None,
+    rrf_k: int = 60,
+    fts_weight: float = 1.0,
+    vector_weight: float = 1.0,
+    candidate_multiplier: int = 2,
+    use_sqlite_fallback: bool = True,
+) -> HybridSearchOutput:
+    """Search chunks using FTS + vector backends with RRF fusion.
+
+    Args:
+        question: Query text.
+        top_k: Number of fused results to return.
+        db_path: Path to the SQLite database.
+        embeddings_client: Client for query embeddings.
+        chroma_config: Chroma configuration.
+        chroma_store: Optional store override for testing.
+        rrf_k: RRF constant; larger values reduce rank bias.
+        fts_weight: Weight applied to FTS contributions.
+        vector_weight: Weight applied to vector contributions.
+        candidate_multiplier: Multiplier for per-backend candidate pools.
+        use_sqlite_fallback: Whether to fallback to SQLite embeddings if Chroma fails.
+    Returns:
+        HybridSearchOutput containing results and warnings.
+    Raises:
+        FileNotFoundError: When the database path does not exist.
+        ValueError: When parameters are invalid.
+        sqlite3.Error: When SQLite operations fail.
+    """
+
+    if top_k <= 0:
+        raise ValueError("top_k must be > 0")
+    if candidate_multiplier <= 0:
+        raise ValueError("candidate_multiplier must be > 0")
+    if rrf_k <= 0:
+        raise ValueError("rrf_k must be > 0")
+    if fts_weight < 0 or vector_weight < 0:
+        raise ValueError("weights must be >= 0")
+    if fts_weight == 0 and vector_weight == 0:
+        raise ValueError("at least one weight must be > 0")
+    if not db_path.exists():
+        raise FileNotFoundError(f"Database not found: {db_path}")
+
+    warnings: list[str] = []
+    candidate_k = top_k * candidate_multiplier
+
+    fts_results = (
+        search_fts(question, top_k=candidate_k, db_path=db_path)
+        if fts_weight > 0
+        else []
+    )
+
+    vector_results: list[ChunkResult] = []
+    if vector_weight > 0:
+        try:
+            query_embedding = embeddings_client.embed([question]).embeddings[0]
+        except Exception as exc:  # pragma: no cover - defensive for API failures
+            warnings.append(
+                f"Embedding failed ({exc}); skipping vector search."
+            )
+            query_embedding = None
+
+        if query_embedding is not None:
+            try:
+                vector_results = search_vector_chroma_with_embedding(
+                    query_embedding,
+                    top_k=candidate_k,
+                    db_path=db_path,
+                    chroma_config=chroma_config,
+                    chroma_store=chroma_store,
+                )
+                if not vector_results and use_sqlite_fallback:
+                    warnings.append(
+                        "Chroma returned no results; falling back to SQLite embeddings."
+                    )
+                    vector_results = search_vector_with_embedding(
+                        query_embedding,
+                        top_k=candidate_k,
+                        db_path=db_path,
+                    )
+            except ImportError as exc:
+                if use_sqlite_fallback:
+                    warnings.append(
+                        f"Chroma unavailable ({exc}); falling back to SQLite embeddings."
+                    )
+                    vector_results = search_vector_with_embedding(
+                        query_embedding,
+                        top_k=candidate_k,
+                        db_path=db_path,
+                    )
+                else:
+                    warnings.append(
+                        f"Chroma unavailable ({exc}); skipping vector search."
+                    )
+
+            if use_sqlite_fallback and vector_results == []:
+                warnings.append(
+                    "SQLite embedding search returned no results; check stored embeddings."
+                )
+
+    results = _fuse_rrf(
+        fts_results,
+        vector_results,
+        top_k=top_k,
+        rrf_k=rrf_k,
+        fts_weight=fts_weight,
+        vector_weight=vector_weight,
+    )
+    return HybridSearchOutput(results=results, warnings=warnings)
 
 
 def search_vector_with_embedding(
@@ -342,3 +582,103 @@ def _dot_product(left: Iterable[float], right: Iterable[float]) -> float:
     """Compute dot product between two equal-length vectors."""
 
     return sum(left_value * right_value for left_value, right_value in zip(left, right))
+
+
+def _fuse_rrf(
+    fts_results: Sequence[ChunkResult],
+    vector_results: Sequence[ChunkResult],
+    *,
+    top_k: int,
+    rrf_k: int,
+    fts_weight: float,
+    vector_weight: float,
+) -> list[HybridChunkResult]:
+    """Fuse backend results using reciprocal rank fusion (RRF).
+
+    Args:
+        fts_results: Results from SQLite FTS search.
+        vector_results: Results from vector search.
+        top_k: Number of results to return.
+        rrf_k: RRF constant.
+        fts_weight: Weight applied to FTS contributions.
+        vector_weight: Weight applied to vector contributions.
+    Returns:
+        Ranked hybrid results with provenance.
+    Raises:
+        ValueError: When parameters are invalid.
+    """
+
+    if top_k <= 0:
+        raise ValueError("top_k must be > 0")
+    if rrf_k <= 0:
+        raise ValueError("rrf_k must be > 0")
+    if fts_weight < 0 or vector_weight < 0:
+        raise ValueError("weights must be >= 0")
+    if fts_weight == 0 and vector_weight == 0:
+        raise ValueError("at least one weight must be > 0")
+
+    merged: dict[str, dict[str, object]] = {}
+    order_counter = 0
+
+    def add_backend(
+        results: Sequence[ChunkResult],
+        *,
+        backend: Literal["fts", "vector"],
+        weight: float,
+    ) -> None:
+        nonlocal order_counter
+        if weight == 0:
+            return
+        for index, result in enumerate(results):
+            rank = index + 1
+            normalized_score = 1.0 / rank
+            rrf_contribution = weight / (rrf_k + rank)
+            entry = merged.get(result.chunk_uid)
+            if entry is None:
+                entry = {
+                    "chunk": result,
+                    "rrf_score": 0.0,
+                    "provenance": [],
+                    "first_seen": order_counter,
+                }
+                merged[result.chunk_uid] = entry
+                order_counter += 1
+
+            entry["rrf_score"] = float(entry["rrf_score"]) + rrf_contribution
+            provenance: list[BackendProvenance] = entry["provenance"]  # type: ignore[assignment]
+            provenance.append(
+                BackendProvenance(
+                    backend=backend,
+                    rank=rank,
+                    raw_score=result.score,
+                    normalized_score=normalized_score,
+                    rrf_contribution=rrf_contribution,
+                )
+            )
+
+    add_backend(fts_results, backend="fts", weight=fts_weight)
+    add_backend(vector_results, backend="vector", weight=vector_weight)
+
+    if not merged:
+        return []
+
+    ranked = sorted(
+        merged.values(),
+        key=lambda entry: (-float(entry["rrf_score"]), int(entry["first_seen"])),
+    )
+    output: list[HybridChunkResult] = []
+    for entry in ranked[:top_k]:
+        chunk: ChunkResult = entry["chunk"]  # type: ignore[assignment]
+        provenance = entry["provenance"]
+        output.append(
+            HybridChunkResult(
+                chunk_uid=chunk.chunk_uid,
+                chunk_id=chunk.chunk_id,
+                paper_id=chunk.paper_id,
+                page_number=chunk.page_number,
+                text=chunk.text,
+                rrf_score=float(entry["rrf_score"]),
+                provenance=provenance,
+            )
+        )
+    return output

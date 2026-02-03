@@ -18,7 +18,12 @@ from arxiv_rag.chroma_inspect import inspect_chroma_counts
 from arxiv_rag.db import normalize_embedding, serialize_embedding
 from arxiv_rag.embeddings_client import EmbeddingsClient, EmbeddingsConfig
 from arxiv_rag.indexer import index_chunks
-from arxiv_rag.retrieve import format_snippet, search_fts, search_vector_chroma
+from arxiv_rag.retrieve import (
+    format_snippet,
+    search_fts,
+    search_hybrid,
+    search_vector_chroma,
+)
 
 app = typer.Typer(help="CLI for arXiv RAG utilities.")
 
@@ -36,7 +41,7 @@ def main(ctx: typer.Context) -> None:
 def query(
     question: str,
     top_k: int = typer.Option(5, help="Number of chunks to return."),
-    mode: Literal["fts", "vector"] = typer.Option(
+    mode: Literal["fts", "vector", "hybrid"] = typer.Option(
         "fts",
         help="Retrieval mode.",
     ),
@@ -71,10 +76,26 @@ def query(
     ),
     show_score: bool = typer.Option(
         False,
-        help="Include BM25 score in the output.",
+        help="Include score in the output.",
+    ),
+    verbose: bool = typer.Option(
+        False,
+        help="Show retrieval details.",
+    ),
+    rrf_k: int = typer.Option(
+        60,
+        help="RRF constant for hybrid fusion.",
+    ),
+    rrf_weight_fts: float = typer.Option(
+        1.0,
+        help="RRF weight for FTS results.",
+    ),
+    rrf_weight_vector: float = typer.Option(
+        1.0,
+        help="RRF weight for vector results.",
     ),
 ) -> None:
-    """Query SQLite for matching chunks via FTS or embeddings."""
+    """Query SQLite for matching chunks via FTS, vector, or hybrid retrieval."""
 
     if snippet_chars <= 0:
         typer.echo("snippet_chars must be > 0", err=True)
@@ -83,7 +104,7 @@ def query(
     try:
         if mode == "fts":
             results = search_fts(question, top_k=top_k, db_path=db)
-        else:
+        elif mode == "vector":
             embeddings_client = EmbeddingsClient(EmbeddingsConfig(model=model))
             chroma_config = ChromaConfig(
                 persist_dir=chroma_dir,
@@ -97,6 +118,26 @@ def query(
                 embeddings_client=embeddings_client,
                 chroma_config=chroma_config,
             )
+        else:
+            embeddings_client = EmbeddingsClient(EmbeddingsConfig(model=model))
+            chroma_config = ChromaConfig(
+                persist_dir=chroma_dir,
+                collection_name=collection,
+                distance=distance,
+            )
+            output = search_hybrid(
+                question,
+                top_k=top_k,
+                db_path=db,
+                embeddings_client=embeddings_client,
+                chroma_config=chroma_config,
+                rrf_k=rrf_k,
+                fts_weight=rrf_weight_fts,
+                vector_weight=rrf_weight_vector,
+            )
+            for warning in output.warnings:
+                typer.echo(f"Warning: {warning}", err=True)
+            results = output.results
     except FileNotFoundError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
@@ -114,12 +155,39 @@ def query(
         typer.echo("No results found.")
         raise typer.Exit(code=0)
 
+    if verbose and mode == "hybrid":
+        typer.echo("Raw scores: lower is better for BM25 and Chroma distance.")
+
     for index, result in enumerate(results):
         snippet = format_snippet(result.text, snippet_chars)
         line = f"[arXiv:{result.paper_id} p.{result.page_number}] {snippet}"
-        if show_score and result.score is not None:
-            line = f"{line} (score={result.score:.3f})"
+        if show_score:
+            if mode == "hybrid":
+                line = f"{line} (rrf={result.rrf_score:.6f})"
+            elif result.score is not None:
+                line = f"{line} (score={result.score:.3f})"
         typer.echo(line)
+        if verbose:
+            if mode == "hybrid":
+                backends = "+".join(sorted({prov.backend for prov in result.provenance}))
+                typer.echo(f"  sources={backends}")
+                typer.echo(f"  rrf_total={result.rrf_score:.6f}")
+                for prov in result.provenance:
+                    raw_value = (
+                        "n/a"
+                        if prov.raw_score is None
+                        else f"{prov.raw_score:.6f}"
+                    )
+                    typer.echo(
+                        "  "
+                        f"{prov.backend} "
+                        f"rank={prov.rank} "
+                        f"raw={raw_value} "
+                        f"norm={prov.normalized_score:.6f} "
+                        f"rrf={prov.rrf_contribution:.6f}"
+                    )
+            elif result.score is not None:
+                typer.echo(f"  score={result.score:.6f}")
         if index < len(results) - 1:
             typer.echo()
 

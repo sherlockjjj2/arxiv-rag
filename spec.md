@@ -125,7 +125,7 @@ Start with a focused topic to make evaluation easier:
 
 ### SQLite Tables
 
-```sql
+````sql
 -- Papers metadata
 CREATE TABLE papers (
     paper_id TEXT PRIMARY KEY,      -- arXiv ID: "2312.10997"
@@ -184,7 +184,7 @@ END;
 
 ### Canonical Chunk Schema (Logical)
 
-Use a stable `chunk_uid` as the **cross-index join key** (SQLite ↔ Chroma ↔ FAISS).
+Use a stable `chunk_uid` as the **cross-index join key** (SQLite ↔ Chroma; FAISS optional later).
 `chunk_id` remains a SQLite-internal row identifier only.
 
 Recommended fields:
@@ -201,7 +201,7 @@ Recommended fields:
   "char_end": 1875,
   "token_count": 512
 }
-```
+````
 
 Chunk UID options + trade-offs:
 
@@ -212,16 +212,17 @@ Chunk UID options + trade-offs:
 
 -- Query log for evaluation
 CREATE TABLE query_log (
-    query_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    query_text TEXT NOT NULL,
-    timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
-    retrieved_chunks TEXT,          -- JSON array of chunk_uids
-    answer TEXT,
-    latency_ms INTEGER,
-    model TEXT,
-    feedback INTEGER                -- 1=good, 0=bad, NULL=not rated
+query_id INTEGER PRIMARY KEY AUTOINCREMENT,
+query_text TEXT NOT NULL,
+timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+retrieved_chunks TEXT, -- JSON array of chunk_uids
+answer TEXT,
+latency_ms INTEGER,
+model TEXT,
+feedback INTEGER -- 1=good, 0=bad, NULL=not rated
 );
-```
+
+````
 
 ### ChromaDB Collection
 
@@ -246,7 +247,7 @@ collection = chroma_client.create_collection(
     },
     "document": "chunk text..."      # Optional, can fetch from SQLite
 }
-```
+````
 
 ### MVP Embeddings (SQLite + In-Memory Cosine)
 
@@ -445,6 +446,15 @@ def hybrid_search(
     return [get_chunk_with_metadata(chunk_uid) for chunk_uid, _ in ranked]
 ```
 
+**Hybrid implementation notes (MVP)**
+
+- Candidate pool per backend: `top_k * 2`
+- RRF constant `k=60`, equal weights for FTS + vector
+- Dedupe by `chunk_uid`
+- Stable tie-breaker: first-seen order (FTS list first, then vector list)
+- If Chroma is unavailable or returns zero results, fallback to SQLite embeddings
+- Verbose provenance: `rank`, `raw score/distance`, `normalized rank score (1 / rank)`, `RRF contribution`
+
 ### 6.2 FTS5 Search
 
 ```python
@@ -462,8 +472,9 @@ def search_fts(query: str, top_k: int = 20) -> list[str]:
         ORDER BY score
         LIMIT ?
     """
-    # FTS5 query syntax: use AND between terms
-    fts_query = ' AND '.join(query.split())
+    # FTS5 query syntax: drop stopwords; require longer terms, OR shorter ones
+    # Example: "(typical AND patterns) AND (agent)"
+    fts_query = build_fts_query(query)
 
     cursor.execute(sql, (fts_query, top_k))
     return [row[0] for row in cursor.fetchall()]
@@ -538,7 +549,7 @@ arxiv-rag query "How does RAG handle hallucination?" \
 arxiv-rag sources "contrastive learning for embeddings" --top-k 5
 
 # Verify mode: show chunks + open PDF
-arxiv-rag query "What is the FAISS index?" --verify
+arxiv-rag query "How does vector search work?" --verify
 
 # Index management
 arxiv-rag index --papers ./papers/ --rebuild
@@ -767,12 +778,12 @@ def evaluate(eval_set: list[dict]) -> dict:
 
 **Goal**: Hybrid retrieval working
 
-- [ ] OpenAI embeddings integration
-- [ ] ChromaDB setup and indexing
-- [ ] Hybrid search with RRF
-- [ ] CLI: `--verbose` flag to show retrieval
+- [x] OpenAI embeddings integration
+- [x] ChromaDB setup and indexing
+- [x] Hybrid search with RRF
+- [x] CLI: `--verbose` flag to show retrieval
 
-**Deliverable**: `arxiv-rag sources "How does FAISS work?"` returns relevant chunks from both indexes
+**Deliverable**: `arxiv-rag sources "How does vector search work?"` returns relevant chunks from both BM25 + Chroma
 
 ### Phase 3: Generation + Citations (Days 3)
 

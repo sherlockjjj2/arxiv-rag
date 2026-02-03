@@ -134,6 +134,11 @@ are deleted and replaced with the latest version.
 uv run arxiv-rag query "dense retrieval" --top-k 5
 ```
 
+Notes:
+
+- FTS query building removes common stopwords.
+- Terms length >= 6 are required (AND); shorter terms are optional (OR).
+
 Fallback entrypoints:
 
 ```bash
@@ -175,6 +180,23 @@ Notes:
 ```bash
 uv run arxiv-rag query "dense retrieval" --mode vector --top-k 5
 ```
+
+### Hybrid retrieval (RRF)
+
+```bash
+uv run arxiv-rag query "dense retrieval" --mode hybrid --top-k 5
+```
+
+Verbose provenance (rank, raw score/distance, normalized rank score, RRF contribution):
+
+```bash
+uv run arxiv-rag query "dense retrieval" --mode hybrid --top-k 5 --verbose
+```
+
+Notes:
+
+- Hybrid retrieval fuses FTS + vector results using RRF.
+- If Chroma is unavailable or empty, it falls back to SQLite embeddings.
 
 ### Inspect Chroma counts
 
