@@ -407,6 +407,42 @@ def parse_citation_quotes(answer: str) -> dict[str, str]:
     return quotes
 
 
+def parse_citation_quotes_with_errors(
+    answer: str,
+) -> tuple[dict[str, str], list[VerifyError]]:
+    """Extract supporting quotes for each citation occurrence without failing fast.
+
+    Expected format: [arXiv:ID p.N] *"quote"*
+
+    Args:
+        answer: Generated answer text.
+    Returns:
+        Mapping from citation_id (c1, c2, ...) to extracted quote text plus errors.
+    Edge cases:
+        Missing quotes are reported as errors but other quotes are preserved.
+    """
+
+    quotes: dict[str, str] = {}
+    errors: list[VerifyError] = []
+    matches = list(CITATION_PATTERN.finditer(answer))
+    for index, match in enumerate(matches, start=1):
+        window_end = matches[index].start() if index < len(matches) else len(answer)
+        after = answer[match.end() : window_end]
+        quote_match = re.match(r'\s*\*"(.*?)"\*', after, flags=re.DOTALL)
+        if not quote_match:
+            errors.append(
+                VerifyError(
+                    code="missing_quote",
+                    message=f"Missing adjacent quote after citation c{index}",
+                    citation_id=f"c{index}",
+                )
+            )
+            continue
+        quote = normalize_whitespace(quote_match.group(1))
+        quotes[f"c{index}"] = quote
+    return quotes, errors
+
+
 def attach_quotes(
     citations: Iterable[CitationRecord],
     quotes_by_id: Mapping[str, str],
@@ -595,12 +631,15 @@ def load_page_texts_for_citations(
 def locate_quotes_in_pages(
     citations: Iterable[CitationRecord],
     page_texts: Mapping[tuple[str, int], str],
+    *,
+    emit_missing_quote: bool = True,
 ) -> tuple[list[CitationRecord], list[VerifyError]]:
     """Locate each citation quote within the corresponding page text.
 
     Args:
         citations: Citation records with quote snippets.
         page_texts: Mapping from (paper_id, page_number) to page text.
+        emit_missing_quote: Whether to emit errors for missing quote snippets.
     Returns:
         Updated citations with quote offsets plus any errors.
     """
@@ -611,13 +650,14 @@ def locate_quotes_in_pages(
     for citation in citations:
         quote = citation.quote
         if not quote:
-            errors.append(
-                VerifyError(
-                    code="missing_quote",
-                    message=f"Missing quote for {citation.citation_id}",
-                    citation_id=citation.citation_id,
+            if emit_missing_quote:
+                errors.append(
+                    VerifyError(
+                        code="missing_quote",
+                        message=f"Missing quote for {citation.citation_id}",
+                        citation_id=citation.citation_id,
+                    )
                 )
-            )
             updated.append(citation)
             continue
 
@@ -945,8 +985,22 @@ def verify_answer(
         )
 
     try:
-        quotes_by_id = parse_citation_quotes(answer)
-        citations = attach_quotes(citations, quotes_by_id)
+        quotes_by_id, quote_errors = parse_citation_quotes_with_errors(answer)
+        errors.extend(quote_errors)
+        updated: list[CitationRecord] = []
+        for citation in citations:
+            updated.append(
+                CitationRecord(
+                    citation_id=citation.citation_id,
+                    paper_id=citation.paper_id,
+                    page_number=citation.page_number,
+                    quote=quotes_by_id.get(citation.citation_id),
+                    chunk_uid=citation.chunk_uid,
+                    quote_start=citation.quote_start,
+                    quote_end=citation.quote_end,
+                )
+            )
+        citations = updated
     except ValueError as exc:
         errors.append(
             VerifyError(
@@ -962,7 +1016,11 @@ def verify_answer(
     )
     errors.extend(page_errors)
 
-    located, quote_errors = locate_quotes_in_pages(citations, page_texts)
+    located, quote_errors = locate_quotes_in_pages(
+        citations,
+        page_texts,
+        emit_missing_quote=False,
+    )
     errors.extend(quote_errors)
 
     sentences = map_sentence_citations(answer)
