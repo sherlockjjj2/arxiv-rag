@@ -4,9 +4,15 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Iterable, Literal, Mapping
 
-from arxiv_rag.arxiv_ids import base_id_from_versioned, is_valid_base_id
+from arxiv_rag.arxiv_ids import (
+    base_id_from_versioned,
+    is_valid_base_id,
+    normalize_base_id_for_lookup,
+)
+from arxiv_rag.db import load_page_numbers_by_paper, load_paper_ids
 
 _ARXIV_ID_PATTERN = (
     r"(?P<paper_id>"
@@ -141,15 +147,26 @@ def parse_citations(answer: str) -> list[CitationRecord]:
         answer: Generated answer text containing citations.
     Returns:
         Ordered list of parsed citations with normalized paper IDs.
+    Raises:
+        ValueError: If malformed citations are found or IDs are invalid.
     Edge cases:
         Returns an empty list when no citations are present.
     """
+
+    malformed = find_malformed_citations(answer)
+    if malformed:
+        joined = ", ".join(malformed)
+        raise ValueError(f"Malformed citations found: {joined}")
 
     citations: list[CitationRecord] = []
     for index, match in enumerate(CITATION_PATTERN.finditer(answer), start=1):
         raw_paper_id = match.group("paper_id")
         paper_id = base_id_from_versioned(raw_paper_id)
+        if not is_valid_base_id(paper_id):
+            raise ValueError(f"Invalid arXiv ID: {paper_id}")
         page_number = int(match.group("page_number"))
+        if page_number < 1:
+            raise ValueError(f"Invalid page number: {page_number}")
         citations.append(
             CitationRecord(
                 citation_id=f"c{index}",
@@ -172,9 +189,16 @@ def find_malformed_citations(answer: str) -> list[str]:
     """
 
     malformed: list[str] = []
+
     for match in re.finditer(r"\[arXiv:[^\]]*\]", answer, flags=re.IGNORECASE):
         if not CITATION_PATTERN.fullmatch(match.group(0)):
             malformed.append(match.group(0))
+
+    if re.search(r"\[\[arXiv:", answer, flags=re.IGNORECASE):
+        malformed.append("[[arXiv:")
+    if re.search(r"arXiv:[^\]]*\]\]", answer, flags=re.IGNORECASE):
+        malformed.append("arXiv:...]]")
+
     return malformed
 
 
@@ -196,9 +220,22 @@ def validate_citations(
     """
 
     errors: list[VerifyError] = []
-    known_ids = set(known_paper_ids) if known_paper_ids is not None else None
+    known_ids = (
+        {normalize_base_id_for_lookup(paper_id) for paper_id in known_paper_ids}
+        if known_paper_ids is not None
+        else None
+    )
+    max_pages_norm = (
+        {
+            normalize_base_id_for_lookup(paper_id): max_pages
+            for paper_id, max_pages in max_pages_by_paper.items()
+        }
+        if max_pages_by_paper is not None
+        else None
+    )
 
     for citation in citations:
+        normalized_id = normalize_base_id_for_lookup(citation.paper_id)
         if not is_valid_base_id(citation.paper_id):
             errors.append(
                 VerifyError(
@@ -209,7 +246,7 @@ def validate_citations(
             )
             continue
 
-        if known_ids is not None and citation.paper_id not in known_ids:
+        if known_ids is not None and normalized_id not in known_ids:
             errors.append(
                 VerifyError(
                     code="unknown_paper_id",
@@ -230,8 +267,8 @@ def validate_citations(
                 )
             )
 
-        if max_pages_by_paper is not None:
-            max_pages = max_pages_by_paper.get(citation.paper_id)
+        if max_pages_norm is not None:
+            max_pages = max_pages_norm.get(normalized_id)
             if max_pages is None:
                 errors.append(
                     VerifyError(
@@ -253,6 +290,70 @@ def validate_citations(
                 )
 
     return errors
+
+
+def validate_citations_in_db(
+    citations: Iterable[CitationRecord],
+    *,
+    db_path: Path,
+) -> None:
+    """Validate citations against the database for known IDs and pages.
+
+    Args:
+        citations: Parsed citation records to validate.
+        db_path: SQLite database path.
+    Raises:
+        FileNotFoundError: If the database path does not exist.
+        ValueError: If a citation references an unknown paper or missing page.
+        sqlite3.Error: If database queries fail.
+    """
+
+    citations_list = list(citations)
+    if not citations_list:
+        return
+
+    known_ids = load_paper_ids(db_path)
+    known_ids_by_normalized = {
+        normalize_base_id_for_lookup(paper_id): paper_id for paper_id in known_ids
+    }
+    resolved_paper_ids: set[str] = set()
+    for citation in citations_list:
+        normalized_id = normalize_base_id_for_lookup(citation.paper_id)
+        stored_id = known_ids_by_normalized.get(normalized_id)
+        if stored_id is None:
+            raise ValueError(f"Unknown arXiv ID: {citation.paper_id}")
+        resolved_paper_ids.add(stored_id)
+
+    pages_by_paper = load_page_numbers_by_paper(db_path, sorted(resolved_paper_ids))
+    pages_by_paper_normalized = {
+        normalize_base_id_for_lookup(paper_id): pages
+        for paper_id, pages in pages_by_paper.items()
+    }
+    for citation in citations_list:
+        normalized_id = normalize_base_id_for_lookup(citation.paper_id)
+        pages = pages_by_paper_normalized.get(normalized_id, set())
+        if citation.page_number not in pages:
+            raise ValueError(
+                "Missing page "
+                f"{citation.page_number} for {citation.paper_id}"
+            )
+
+
+def parse_and_validate_citations(answer: str, *, db_path: Path) -> list[CitationRecord]:
+    """Parse citations and validate against database records.
+
+    Args:
+        answer: Generated answer text containing citations.
+        db_path: SQLite database path.
+    Returns:
+        Parsed citation records if validation succeeds.
+    Raises:
+        ValueError: If citations are malformed or unresolved.
+    """
+
+    citations = parse_citations(answer)
+    validate_citations_in_db(citations, db_path=db_path)
+    return citations
 
 
 def parse_citation_quotes(answer: str) -> dict[str, str]:
