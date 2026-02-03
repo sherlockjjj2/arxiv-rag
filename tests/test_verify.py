@@ -96,6 +96,12 @@ def test_parse_citation_quotes_requires_adjacency() -> None:
         parse_citation_quotes(answer)
 
 
+def test_parse_citation_quotes_rejects_empty_quote() -> None:
+    answer = 'Fact [arXiv:2301.01234 p.1] *""*'
+    with pytest.raises(ValueError):
+        parse_citation_quotes(answer)
+
+
 def test_parse_and_validate_citations_success(tmp_path: Path) -> None:
     db_path = tmp_path / "test.db"
     _seed_db(db_path)
@@ -235,3 +241,31 @@ def test_verify_answer_missing_quote_preserves_other_quotes(tmp_path: Path) -> N
     assert report.citations[1].quote == "Quoted line."
     assert report.citations[1].quote_start is not None
     assert report.citations[1].quote_end is not None
+
+
+def test_verify_answer_empty_quote_is_missing(tmp_path: Path) -> None:
+    db_path = tmp_path / "test.db"
+    pdf_path = tmp_path / "2301.01234.pdf"
+    _seed_db(db_path, pdf_path=pdf_path)
+
+    parsed_dir = tmp_path / "parsed"
+    parsed_dir.mkdir()
+    parsed_payload = {
+        "doc_id": "doc-2301.01234",
+        "pdf_path": str(pdf_path),
+        "num_pages": 3,
+        "pages": [{"page": 3, "text": "Quoted line."}],
+    }
+    (parsed_dir / "2301.01234.json").write_text(
+        json.dumps(parsed_payload),
+        encoding="utf-8",
+    )
+
+    answer = (
+        'Fact [arXiv:2301.01234 p.3] *""* '
+        'Another [arXiv:2301.01234 p.3] *"Quoted line."*'
+    )
+    report = verify_answer(answer, db_path=db_path, parsed_dir=parsed_dir)
+    codes = [error.code for error in report.errors]
+    assert codes.count("missing_quote") == 1
+    assert report.citations[1].quote == "Quoted line."

@@ -337,7 +337,7 @@ def load_chunks_by_uid(
     conn: sqlite3.Connection,
     chunk_uids: Sequence[str],
     scores_by_uid: Mapping[str, float] | None = None,
-) -> list[ChunkResult]:
+) -> list[ChunkResult]:  # sourcery skip: for-append-to-extend
     """Load chunk rows for a set of chunk_uids, preserving order.
 
     Args:

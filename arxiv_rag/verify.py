@@ -403,6 +403,8 @@ def parse_citation_quotes(answer: str) -> dict[str, str]:
         if not quote_match:
             raise ValueError(f"Missing adjacent quote after citation c{index}")
         quote = normalize_whitespace(quote_match.group(1))
+        if not quote:
+            raise ValueError(f"Empty quote after citation c{index}")
         quotes[f"c{index}"] = quote
     return quotes
 
@@ -439,6 +441,15 @@ def parse_citation_quotes_with_errors(
             )
             continue
         quote = normalize_whitespace(quote_match.group(1))
+        if not quote:
+            errors.append(
+                VerifyError(
+                    code="missing_quote",
+                    message=f"Empty quote after citation c{index}",
+                    citation_id=f"c{index}",
+                )
+            )
+            continue
         quotes[f"c{index}"] = quote
     return quotes, errors
 
