@@ -337,7 +337,7 @@ def load_chunks_by_uid(
     conn: sqlite3.Connection,
     chunk_uids: Sequence[str],
     scores_by_uid: Mapping[str, float] | None = None,
-) -> list[ChunkResult]:
+) -> list[ChunkResult]:  # sourcery skip: for-append-to-extend
     """Load chunk rows for a set of chunk_uids, preserving order.
 
     Args:
@@ -440,9 +440,7 @@ def search_hybrid(
         try:
             query_embedding = embeddings_client.embed([question]).embeddings[0]
         except Exception as exc:  # pragma: no cover - defensive for API failures
-            warnings.append(
-                f"Embedding failed ({exc}); skipping vector search."
-            )
+            warnings.append(f"Embedding failed ({exc}); skipping vector search.")
             query_embedding = None
 
         if query_embedding is not None:

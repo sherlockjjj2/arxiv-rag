@@ -53,7 +53,9 @@ def test_load_prompt_template_prefers_packaged_resource(
     missing_path = tmp_path / "missing.txt"
 
     monkeypatch.setattr(generate, "_DEFAULT_PROMPT_PATH", missing_path)
-    monkeypatch.setattr(generate, "_load_packaged_prompt_template", lambda: "P\n{chunks}")
+    monkeypatch.setattr(
+        generate, "_load_packaged_prompt_template", lambda: "P\n{chunks}"
+    )
 
     template = generate.load_prompt_template()
 
@@ -82,9 +84,7 @@ def test_prompt_template_included_in_package_data() -> None:
         (repo_root / "pyproject.toml").read_text(encoding="utf-8")
     )
     package_data = (
-        pyproject.get("tool", {})
-        .get("setuptools", {})
-        .get("package-data", {})
+        pyproject.get("tool", {}).get("setuptools", {}).get("package-data", {})
     )
 
     assert "prompts/*.txt" in package_data.get("arxiv_rag", [])
@@ -147,7 +147,9 @@ def test_generate_answer_uses_prompt_and_model(monkeypatch: pytest.MonkeyPatch) 
             return "final answer"
 
     monkeypatch.setattr(generate, "GenerationClient", DummyClient)
-    monkeypatch.setattr(generate, "load_prompt_template", lambda path=None: "P\n{chunks}")
+    monkeypatch.setattr(
+        generate, "load_prompt_template", lambda path=None: "P\n{chunks}"
+    )
 
     chunks = [
         Chunk(

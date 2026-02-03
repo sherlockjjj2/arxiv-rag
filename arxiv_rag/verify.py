@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,7 +13,11 @@ from arxiv_rag.arxiv_ids import (
     is_valid_base_id,
     normalize_base_id_for_lookup,
 )
-from arxiv_rag.db import load_page_numbers_by_paper, load_paper_ids
+from arxiv_rag.db import (
+    load_page_numbers_by_paper,
+    load_paper_ids,
+    load_paper_pdf_paths,
+)
 
 _ARXIV_ID_PATTERN = (
     r"(?P<paper_id>"
@@ -77,12 +82,14 @@ class VerifyError:
         message: Human-readable error message.
         citation_id: Optional citation ID associated with the error.
         sentence_index: Optional sentence index associated with the error.
+        paragraph_index: Optional paragraph index associated with the error.
     """
 
     code: str
     message: str
     citation_id: str | None = None
     sentence_index: int | None = None
+    paragraph_index: int | None = None
 
 
 @dataclass(frozen=True)
@@ -93,13 +100,30 @@ class VerifyReport:
         status: "pass", "fail", or "error".
         errors: List of deterministic validation errors.
         sentences: Per-sentence verification metadata.
+        paragraphs: Per-paragraph verification metadata.
         citations: Parsed citation records.
     """
 
     status: Literal["pass", "fail", "error"]
     errors: list[VerifyError]
     sentences: list[SentenceCheck]
+    paragraphs: list["ParagraphCheck"]
     citations: list[CitationRecord]
+
+
+@dataclass(frozen=True)
+class ParagraphCheck:
+    """Verification metadata for a single paragraph.
+
+    Args:
+        paragraph_index: 0-based paragraph index within the answer.
+        text: Paragraph text.
+        citations: List of citation IDs associated with this paragraph.
+    """
+
+    paragraph_index: int
+    text: str
+    citations: list[str]
 
 
 def normalize_whitespace(text: str) -> str:
@@ -334,8 +358,7 @@ def validate_citations_in_db(
         pages = pages_by_paper_normalized.get(normalized_id, set())
         if citation.page_number not in pages:
             raise ValueError(
-                "Missing page "
-                f"{citation.page_number} for {citation.paper_id}"
+                f"Missing page {citation.page_number} for {citation.paper_id}"
             )
 
 
@@ -376,12 +399,59 @@ def parse_citation_quotes(answer: str) -> dict[str, str]:
     for index, match in enumerate(matches, start=1):
         window_end = matches[index].start() if index < len(matches) else len(answer)
         after = answer[match.end() : window_end]
-        quote_match = re.search(r'\*"(.*?)"\*', after, flags=re.DOTALL)
+        quote_match = re.match(r'\s*\*"(.*?)"\*', after, flags=re.DOTALL)
         if not quote_match:
-            raise ValueError(f"Missing quote after citation c{index}")
+            raise ValueError(f"Missing adjacent quote after citation c{index}")
         quote = normalize_whitespace(quote_match.group(1))
+        if not quote:
+            raise ValueError(f"Empty quote after citation c{index}")
         quotes[f"c{index}"] = quote
     return quotes
+
+
+def parse_citation_quotes_with_errors(
+    answer: str,
+) -> tuple[dict[str, str], list[VerifyError]]:
+    """Extract supporting quotes for each citation occurrence without failing fast.
+
+    Expected format: [arXiv:ID p.N] *"quote"*
+
+    Args:
+        answer: Generated answer text.
+    Returns:
+        Mapping from citation_id (c1, c2, ...) to extracted quote text plus errors.
+    Edge cases:
+        Missing quotes are reported as errors but other quotes are preserved.
+    """
+
+    quotes: dict[str, str] = {}
+    errors: list[VerifyError] = []
+    matches = list(CITATION_PATTERN.finditer(answer))
+    for index, match in enumerate(matches, start=1):
+        window_end = matches[index].start() if index < len(matches) else len(answer)
+        after = answer[match.end() : window_end]
+        quote_match = re.match(r'\s*\*"(.*?)"\*', after, flags=re.DOTALL)
+        if not quote_match:
+            errors.append(
+                VerifyError(
+                    code="missing_quote",
+                    message=f"Missing adjacent quote after citation c{index}",
+                    citation_id=f"c{index}",
+                )
+            )
+            continue
+        quote = normalize_whitespace(quote_match.group(1))
+        if not quote:
+            errors.append(
+                VerifyError(
+                    code="missing_quote",
+                    message=f"Empty quote after citation c{index}",
+                    citation_id=f"c{index}",
+                )
+            )
+            continue
+        quotes[f"c{index}"] = quote
+    return quotes, errors
 
 
 def attach_quotes(
@@ -443,3 +513,536 @@ def match_quote_in_text(
         return None
     end = start + len(normalized_quote)
     return start, end
+
+
+def _resolve_parsed_json_path(
+    parsed_dir: Path,
+    pdf_path: Path | None,
+    paper_id: str,
+) -> Path:
+    """Resolve the parsed JSON path for a paper.
+
+    Args:
+        parsed_dir: Directory containing parsed JSON files.
+        pdf_path: Optional PDF path from the papers table.
+        paper_id: Base arXiv ID.
+    Returns:
+        Path to the parsed JSON file.
+    """
+
+    if pdf_path is not None:
+        return parsed_dir / f"{pdf_path.stem}.json"
+    safe_id = paper_id.replace("/", "_")
+    return parsed_dir / f"{safe_id}.json"
+
+
+def _load_page_texts(parsed_path: Path) -> dict[int, str]:
+    """Load page text from a parsed JSON file.
+
+    Args:
+        parsed_path: Path to the parsed JSON file.
+    Returns:
+        Mapping of page number to page text.
+    Raises:
+        ValueError: If the parsed JSON is missing required fields.
+        json.JSONDecodeError: If the JSON cannot be decoded.
+        OSError: If the file cannot be read.
+    """
+
+    payload = json.loads(parsed_path.read_text(encoding="utf-8"))
+    pages = payload.get("pages")
+    if not isinstance(pages, list):
+        raise ValueError(f"Parsed JSON missing pages: {parsed_path}")
+    page_texts: dict[int, str] = {}
+    for page in pages:
+        page_number = page.get("page")
+        if page_number is None:
+            continue
+        text = page.get("text", "")
+        page_texts[int(page_number)] = text
+    return page_texts
+
+
+def load_page_texts_for_citations(
+    citations: Iterable[CitationRecord],
+    *,
+    db_path: Path,
+    parsed_dir: Path = Path("data/parsed"),
+) -> tuple[dict[tuple[str, int], str], list[VerifyError]]:
+    """Load page text for each citation's paper and page number.
+
+    Args:
+        citations: Citation records to resolve.
+        db_path: SQLite database path.
+        parsed_dir: Directory containing parsed JSON files.
+    Returns:
+        Mapping from (paper_id, page_number) to page text plus any errors.
+    Raises:
+        FileNotFoundError: If the database path does not exist.
+    """
+
+    citations_list = list(citations)
+    if not citations_list:
+        return {}, []
+
+    parsed_dir = parsed_dir or Path("data/parsed")
+    paper_ids = sorted({citation.paper_id for citation in citations_list})
+    pdf_paths = load_paper_pdf_paths(db_path, paper_ids)
+    parsed_cache: dict[Path, dict[int, str]] = {}
+    page_texts: dict[tuple[str, int], str] = {}
+    errors: list[VerifyError] = []
+
+    for citation in citations_list:
+        normalized_id = normalize_base_id_for_lookup(citation.paper_id)
+        pdf_path = pdf_paths.get(normalized_id)
+        parsed_path = _resolve_parsed_json_path(parsed_dir, pdf_path, citation.paper_id)
+
+        if not parsed_path.exists():
+            errors.append(
+                VerifyError(
+                    code="missing_parsed_file",
+                    message=f"Parsed JSON not found: {parsed_path}",
+                    citation_id=citation.citation_id,
+                )
+            )
+            continue
+
+        if parsed_path not in parsed_cache:
+            try:
+                parsed_cache[parsed_path] = _load_page_texts(parsed_path)
+            except (ValueError, json.JSONDecodeError, OSError) as exc:
+                errors.append(
+                    VerifyError(
+                        code="invalid_parsed_json",
+                        message=str(exc),
+                        citation_id=citation.citation_id,
+                    )
+                )
+                continue
+
+        page_text = parsed_cache[parsed_path].get(citation.page_number)
+        if page_text is None:
+            errors.append(
+                VerifyError(
+                    code="missing_page_text",
+                    message=(
+                        "Parsed JSON missing page "
+                        f"{citation.page_number} for {citation.paper_id}"
+                    ),
+                    citation_id=citation.citation_id,
+                )
+            )
+            continue
+
+        page_texts[(citation.paper_id, citation.page_number)] = page_text
+
+    return page_texts, errors
+
+
+def locate_quotes_in_pages(
+    citations: Iterable[CitationRecord],
+    page_texts: Mapping[tuple[str, int], str],
+    *,
+    emit_missing_quote: bool = True,
+) -> tuple[list[CitationRecord], list[VerifyError]]:
+    """Locate each citation quote within the corresponding page text.
+
+    Args:
+        citations: Citation records with quote snippets.
+        page_texts: Mapping from (paper_id, page_number) to page text.
+        emit_missing_quote: Whether to emit errors for missing quote snippets.
+    Returns:
+        Updated citations with quote offsets plus any errors.
+    """
+
+    updated: list[CitationRecord] = []
+    errors: list[VerifyError] = []
+
+    for citation in citations:
+        quote = citation.quote
+        if not quote:
+            if emit_missing_quote:
+                errors.append(
+                    VerifyError(
+                        code="missing_quote",
+                        message=f"Missing quote for {citation.citation_id}",
+                        citation_id=citation.citation_id,
+                    )
+                )
+            updated.append(citation)
+            continue
+
+        page_text = page_texts.get((citation.paper_id, citation.page_number))
+        if page_text is None:
+            errors.append(
+                VerifyError(
+                    code="missing_page_text",
+                    message=(
+                        "Missing page text for "
+                        f"{citation.paper_id} p.{citation.page_number}"
+                    ),
+                    citation_id=citation.citation_id,
+                )
+            )
+            updated.append(citation)
+            continue
+
+        match = match_quote_in_text(quote, page_text)
+        if match is None:
+            errors.append(
+                VerifyError(
+                    code="quote_not_found",
+                    message=(
+                        "Quote not found for "
+                        f"{citation.paper_id} p.{citation.page_number}"
+                    ),
+                    citation_id=citation.citation_id,
+                )
+            )
+            updated.append(citation)
+            continue
+
+        quote_start, quote_end = match
+        updated.append(
+            CitationRecord(
+                citation_id=citation.citation_id,
+                paper_id=citation.paper_id,
+                page_number=citation.page_number,
+                quote=citation.quote,
+                chunk_uid=citation.chunk_uid,
+                quote_start=quote_start,
+                quote_end=quote_end,
+            )
+        )
+
+    return updated, errors
+
+
+def _split_sentences_with_spans(text: str) -> list[tuple[str, int, int]]:
+    """Split normalized text into sentences with offsets.
+
+    Args:
+        text: Raw answer text.
+    Returns:
+        List of tuples containing (sentence, start_offset, end_offset).
+    """
+
+    normalized = normalize_whitespace(text)
+    if not normalized:
+        return []
+
+    splits: list[tuple[str, int, int]] = []
+    boundaries: list[tuple[int, int]] = []
+    index = 0
+    while index < len(normalized):
+        char = normalized[index]
+        if char in ".!?":
+            end = index + 1
+            while end < len(normalized) and normalized[end] in {'"', "'", "*"}:
+                end += 1
+            if end < len(normalized) and normalized[end].isspace():
+                next_start = end
+                while next_start < len(normalized) and normalized[next_start].isspace():
+                    next_start += 1
+                if next_start < len(normalized) and (
+                    normalized[next_start].isupper()
+                    or normalized[next_start].isdigit()
+                    or normalized[next_start] == "["
+                ):
+                    boundaries.append((end, next_start))
+                    index = next_start
+                    continue
+        index += 1
+
+    start = 0
+    for end, next_start in boundaries:
+        segment = normalized[start:end]
+        trimmed = segment.strip()
+        if trimmed:
+            leading = len(segment) - len(segment.lstrip())
+            trailing = len(segment) - len(segment.rstrip())
+            span_start = start + leading
+            span_end = end - trailing
+            splits.append((trimmed, span_start, span_end))
+        start = next_start
+
+    segment = normalized[start:]
+    trimmed = segment.strip()
+    if trimmed:
+        leading = len(segment) - len(segment.lstrip())
+        trailing = len(segment) - len(segment.rstrip())
+        span_start = start + leading
+        span_end = len(normalized) - trailing
+        splits.append((trimmed, span_start, span_end))
+
+    return splits
+
+
+def map_sentence_citations(answer: str) -> list[SentenceCheck]:
+    """Map citations to their containing sentences.
+
+    Args:
+        answer: Generated answer text.
+    Returns:
+        Sentence checks with associated citation IDs.
+    """
+
+    normalized = normalize_whitespace(answer)
+    if not normalized:
+        return []
+
+    citation_positions = [
+        (f"c{index}", match.start(), match.end())
+        for index, match in enumerate(CITATION_PATTERN.finditer(normalized), start=1)
+    ]
+
+    sentences: list[SentenceCheck] = []
+    for sentence_index, (sentence, start, end) in enumerate(
+        _split_sentences_with_spans(answer)
+    ):
+        citation_ids = [
+            citation_id
+            for citation_id, cite_start, cite_end in citation_positions
+            if cite_start >= start and cite_end <= end
+        ]
+        sentences.append(
+            SentenceCheck(
+                sentence_index=sentence_index,
+                text=sentence,
+                citations=citation_ids,
+            )
+        )
+    return sentences
+
+
+def _split_paragraphs_with_spans(text: str) -> list[tuple[str, int, int]]:
+    """Split raw text into paragraphs with offsets.
+
+    Args:
+        text: Raw answer text.
+    Returns:
+        List of tuples containing (paragraph, start_offset, end_offset).
+    """
+
+    if not text.strip():
+        return []
+
+    splits: list[tuple[str, int, int]] = []
+    start = 0
+    for match in re.finditer(r"\n\s*\n+", text):
+        end = match.start()
+        segment = text[start:end]
+        trimmed = normalize_whitespace(segment)
+        if trimmed:
+            splits.append((trimmed, start, end))
+        start = match.end()
+
+    segment = text[start:]
+    trimmed = normalize_whitespace(segment)
+    if trimmed:
+        splits.append((trimmed, start, len(text)))
+
+    return splits
+
+
+def map_paragraph_citations(answer: str) -> list[ParagraphCheck]:
+    """Map citations to their containing paragraphs.
+
+    Args:
+        answer: Generated answer text.
+    Returns:
+        Paragraph checks with associated citation IDs.
+    """
+
+    if not answer.strip():
+        return []
+
+    citation_positions = [
+        (f"c{index}", match.start(), match.end())
+        for index, match in enumerate(CITATION_PATTERN.finditer(answer), start=1)
+    ]
+
+    paragraphs: list[ParagraphCheck] = []
+    for paragraph_index, (paragraph, start, end) in enumerate(
+        _split_paragraphs_with_spans(answer)
+    ):
+        citation_ids = [
+            citation_id
+            for citation_id, cite_start, cite_end in citation_positions
+            if cite_start >= start and cite_end <= end
+        ]
+        paragraphs.append(
+            ParagraphCheck(
+                paragraph_index=paragraph_index,
+                text=paragraph,
+                citations=citation_ids,
+            )
+        )
+    return paragraphs
+
+
+def validate_paragraph_coverage(
+    paragraphs: Iterable[ParagraphCheck],
+) -> list[VerifyError]:
+    """Validate that paragraphs contain citations.
+
+    Args:
+        paragraphs: Paragraph checks to validate.
+    Returns:
+        List of coverage errors.
+    """
+
+    errors: list[VerifyError] = []
+    for paragraph in paragraphs:
+        if paragraph.citations:
+            continue
+        errors.append(
+            VerifyError(
+                code="missing_paragraph_citation",
+                message="Missing citation for paragraph.",
+                paragraph_index=paragraph.paragraph_index,
+            )
+        )
+    return errors
+
+
+def extract_quotes(
+    answer: str,
+    *,
+    db_path: Path,
+    parsed_dir: Path = Path("data/parsed"),
+) -> list[CitationRecord]:
+    """Extract and locate quotes for each citation in an answer.
+
+    Args:
+        answer: Generated answer text.
+        db_path: SQLite database path.
+        parsed_dir: Directory containing parsed JSON files.
+    Returns:
+        Citation records populated with quote and offsets.
+    Raises:
+        ValueError: If citations or quotes are malformed.
+        FileNotFoundError: If the database path does not exist.
+    """
+
+    citations = parse_citations(answer)
+    validate_citations_in_db(citations, db_path=db_path)
+    quotes_by_id = parse_citation_quotes(answer)
+    citations_with_quotes = attach_quotes(citations, quotes_by_id)
+    page_texts, errors = load_page_texts_for_citations(
+        citations_with_quotes,
+        db_path=db_path,
+        parsed_dir=parsed_dir,
+    )
+    if errors:
+        first_error = errors[0]
+        raise ValueError(first_error.message)
+    located, quote_errors = locate_quotes_in_pages(citations_with_quotes, page_texts)
+    if quote_errors:
+        first_error = quote_errors[0]
+        raise ValueError(first_error.message)
+    return located
+
+
+def verify_answer(
+    answer: str,
+    *,
+    db_path: Path,
+    parsed_dir: Path = Path("data/parsed"),
+) -> VerifyReport:
+    """Run deterministic verification on a generated answer.
+
+    Args:
+        answer: Generated answer text.
+        db_path: SQLite database path.
+        parsed_dir: Directory containing parsed JSON files.
+    Returns:
+        Verification report with status, errors, and parsed citations.
+    Raises:
+        FileNotFoundError: If the database path does not exist.
+    """
+
+    errors: list[VerifyError] = []
+    try:
+        citations = parse_citations(answer)
+    except ValueError as exc:
+        return VerifyReport(
+            status="fail",
+            errors=[
+                VerifyError(
+                    code="malformed_citation",
+                    message=str(exc),
+                )
+            ],
+            sentences=[],
+            paragraphs=[],
+            citations=[],
+        )
+
+    try:
+        validate_citations_in_db(citations, db_path=db_path)
+    except ValueError as exc:
+        return VerifyReport(
+            status="fail",
+            errors=[
+                VerifyError(
+                    code="unresolved_citation",
+                    message=str(exc),
+                )
+            ],
+            sentences=[],
+            paragraphs=[],
+            citations=citations,
+        )
+
+    try:
+        quotes_by_id, quote_errors = parse_citation_quotes_with_errors(answer)
+        errors.extend(quote_errors)
+        updated: list[CitationRecord] = []
+        for citation in citations:
+            updated.append(
+                CitationRecord(
+                    citation_id=citation.citation_id,
+                    paper_id=citation.paper_id,
+                    page_number=citation.page_number,
+                    quote=quotes_by_id.get(citation.citation_id),
+                    chunk_uid=citation.chunk_uid,
+                    quote_start=citation.quote_start,
+                    quote_end=citation.quote_end,
+                )
+            )
+        citations = updated
+    except ValueError as exc:
+        errors.append(
+            VerifyError(
+                code="missing_quote",
+                message=str(exc),
+            )
+        )
+
+    page_texts, page_errors = load_page_texts_for_citations(
+        citations,
+        db_path=db_path,
+        parsed_dir=parsed_dir,
+    )
+    errors.extend(page_errors)
+
+    located, quote_errors = locate_quotes_in_pages(
+        citations,
+        page_texts,
+        emit_missing_quote=False,
+    )
+    errors.extend(quote_errors)
+
+    sentences = map_sentence_citations(answer)
+    paragraphs = map_paragraph_citations(answer)
+    errors.extend(validate_paragraph_coverage(paragraphs))
+
+    status = "pass" if not errors else "fail"
+    return VerifyReport(
+        status=status,
+        errors=errors,
+        sentences=sentences,
+        paragraphs=paragraphs,
+        citations=located,
+    )

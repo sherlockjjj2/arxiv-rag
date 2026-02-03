@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -7,7 +8,12 @@ import pytest
 
 from arxiv_rag.chunk_ids import compute_chunk_uid
 from arxiv_rag.db import ensure_chunks_schema, ensure_papers_schema
-from arxiv_rag.verify import parse_and_validate_citations, parse_citations
+from arxiv_rag.verify import (
+    parse_and_validate_citations,
+    parse_citation_quotes,
+    parse_citations,
+    verify_answer,
+)
 
 
 def _seed_db(
@@ -15,15 +21,18 @@ def _seed_db(
     *,
     paper_id: str = "2301.01234",
     page_number: int = 3,
+    pdf_path: Path | None = None,
 ) -> None:
     with sqlite3.connect(db_path) as conn:
         ensure_papers_schema(conn, create_if_missing=True)
         ensure_chunks_schema(conn)
 
         doc_id = f"doc-{paper_id}"
+        pdf_path_str = str(pdf_path) if pdf_path is not None else None
         conn.execute(
-            "INSERT INTO papers (paper_id, doc_id, title) VALUES (?, ?, ?)",
-            (paper_id, doc_id, "Test Paper"),
+            "INSERT INTO papers (paper_id, doc_id, title, pdf_path) "
+            "VALUES (?, ?, ?, ?)",
+            (paper_id, doc_id, "Test Paper", pdf_path_str),
         )
 
         chunk_uid = compute_chunk_uid(
@@ -78,6 +87,21 @@ def test_parse_citations_rejects_page_zero() -> None:
         parse_citations(answer)
 
 
+def test_parse_citation_quotes_requires_adjacency() -> None:
+    answer = (
+        'Fact [arXiv:2301.01234 p.1] intervening text *"quote"* '
+        'More [arXiv:2301.01234 p.2] *"quote"*'
+    )
+    with pytest.raises(ValueError):
+        parse_citation_quotes(answer)
+
+
+def test_parse_citation_quotes_rejects_empty_quote() -> None:
+    answer = 'Fact [arXiv:2301.01234 p.1] *""*'
+    with pytest.raises(ValueError):
+        parse_citation_quotes(answer)
+
+
 def test_parse_and_validate_citations_success(tmp_path: Path) -> None:
     db_path = tmp_path / "test.db"
     _seed_db(db_path)
@@ -112,3 +136,136 @@ def test_parse_and_validate_citations_case_insensitive_old_id(
     answer = 'OK [arXiv:cs.ds/0101001 p.1] *"quote"*'
     citations = parse_and_validate_citations(answer, db_path=db_path)
     assert citations[0].paper_id == "cs.ds/0101001"
+
+
+def test_verify_answer_happy_path(tmp_path: Path) -> None:
+    db_path = tmp_path / "test.db"
+    pdf_path = tmp_path / "2301.01234.pdf"
+    _seed_db(db_path, pdf_path=pdf_path)
+
+    parsed_dir = tmp_path / "parsed"
+    parsed_dir.mkdir()
+    parsed_payload = {
+        "doc_id": "doc-2301.01234",
+        "pdf_path": str(pdf_path),
+        "num_pages": 3,
+        "pages": [{"page": 3, "text": "BERT-based encoders\nmap text to vectors."}],
+    }
+    (parsed_dir / "2301.01234.json").write_text(
+        json.dumps(parsed_payload),
+        encoding="utf-8",
+    )
+
+    answer = 'Fact [arXiv:2301.01234 p.3] *"BERT-based encoders map text"*'
+    report = verify_answer(answer, db_path=db_path, parsed_dir=parsed_dir)
+    assert report.status == "pass"
+    assert report.errors == []
+    assert report.citations[0].quote_start is not None
+    assert report.citations[0].quote_end is not None
+
+
+def test_verify_answer_missing_paragraph_citation(tmp_path: Path) -> None:
+    db_path = tmp_path / "test.db"
+    pdf_path = tmp_path / "2301.01234.pdf"
+    _seed_db(db_path, pdf_path=pdf_path)
+
+    parsed_dir = tmp_path / "parsed"
+    parsed_dir.mkdir()
+    parsed_payload = {
+        "doc_id": "doc-2301.01234",
+        "pdf_path": str(pdf_path),
+        "num_pages": 3,
+        "pages": [{"page": 3, "text": "Quoted line."}],
+    }
+    (parsed_dir / "2301.01234.json").write_text(
+        json.dumps(parsed_payload),
+        encoding="utf-8",
+    )
+
+    answer = (
+        'Fact [arXiv:2301.01234 p.3] *"Quoted line."*\n\nAnother declarative paragraph.'
+    )
+    report = verify_answer(answer, db_path=db_path, parsed_dir=parsed_dir)
+    codes = {error.code for error in report.errors}
+    assert "missing_paragraph_citation" in codes
+
+
+def test_verify_answer_missing_quote(tmp_path: Path) -> None:
+    db_path = tmp_path / "test.db"
+    pdf_path = tmp_path / "2301.01234.pdf"
+    _seed_db(db_path, pdf_path=pdf_path)
+
+    parsed_dir = tmp_path / "parsed"
+    parsed_dir.mkdir()
+    parsed_payload = {
+        "doc_id": "doc-2301.01234",
+        "pdf_path": str(pdf_path),
+        "num_pages": 3,
+        "pages": [{"page": 3, "text": "Quoted line."}],
+    }
+    (parsed_dir / "2301.01234.json").write_text(
+        json.dumps(parsed_payload),
+        encoding="utf-8",
+    )
+
+    answer = "Fact [arXiv:2301.01234 p.3]"
+    report = verify_answer(answer, db_path=db_path, parsed_dir=parsed_dir)
+    codes = {error.code for error in report.errors}
+    assert "missing_quote" in codes
+
+
+def test_verify_answer_missing_quote_preserves_other_quotes(tmp_path: Path) -> None:
+    db_path = tmp_path / "test.db"
+    pdf_path = tmp_path / "2301.01234.pdf"
+    _seed_db(db_path, pdf_path=pdf_path)
+
+    parsed_dir = tmp_path / "parsed"
+    parsed_dir.mkdir()
+    parsed_payload = {
+        "doc_id": "doc-2301.01234",
+        "pdf_path": str(pdf_path),
+        "num_pages": 3,
+        "pages": [{"page": 3, "text": "Quoted line."}],
+    }
+    (parsed_dir / "2301.01234.json").write_text(
+        json.dumps(parsed_payload),
+        encoding="utf-8",
+    )
+
+    answer = (
+        'Fact [arXiv:2301.01234 p.3] Another [arXiv:2301.01234 p.3] *"Quoted line."*'
+    )
+    report = verify_answer(answer, db_path=db_path, parsed_dir=parsed_dir)
+    codes = [error.code for error in report.errors]
+    assert codes.count("missing_quote") == 1
+    assert report.citations[1].quote == "Quoted line."
+    assert report.citations[1].quote_start is not None
+    assert report.citations[1].quote_end is not None
+
+
+def test_verify_answer_empty_quote_is_missing(tmp_path: Path) -> None:
+    db_path = tmp_path / "test.db"
+    pdf_path = tmp_path / "2301.01234.pdf"
+    _seed_db(db_path, pdf_path=pdf_path)
+
+    parsed_dir = tmp_path / "parsed"
+    parsed_dir.mkdir()
+    parsed_payload = {
+        "doc_id": "doc-2301.01234",
+        "pdf_path": str(pdf_path),
+        "num_pages": 3,
+        "pages": [{"page": 3, "text": "Quoted line."}],
+    }
+    (parsed_dir / "2301.01234.json").write_text(
+        json.dumps(parsed_payload),
+        encoding="utf-8",
+    )
+
+    answer = (
+        'Fact [arXiv:2301.01234 p.3] *""* '
+        'Another [arXiv:2301.01234 p.3] *"Quoted line."*'
+    )
+    report = verify_answer(answer, db_path=db_path, parsed_dir=parsed_dir)
+    codes = [error.code for error in report.errors]
+    assert codes.count("missing_quote") == 1
+    assert report.citations[1].quote == "Quoted line."

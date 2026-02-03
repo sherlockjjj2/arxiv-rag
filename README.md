@@ -196,10 +196,17 @@ uv run python -m arxiv_rag.cli query "dense retrieval" --mode hybrid --top-k 5
 uv run python -m arxiv_rag.cli query "How does dense retrieval work?" --mode hybrid --top-k 5 --generate
 ```
 
+Verify citations and quotes in the generated answer:
+
+```bash
+uv run python -m arxiv_rag.cli query "How does dense retrieval work?" --mode hybrid --top-k 5 --generate --verify
+```
+
 Notes:
 
 - `--generate` formats retrieved chunks into a citation prompt and returns a cited answer.
 - Default generation model is `gpt-4o-mini`; override with `--generate-model`.
+- `--verify` enforces paragraph-level citation coverage and quote matching against page text.
 
 Verbose provenance (rank, raw score/distance, normalized rank score, RRF contribution):
 
@@ -242,7 +249,7 @@ uv run python -m arxiv_rag.cli inspect --db data/arxiv_rag.db
 - SQLite schema includes `papers`, `chunks`, and FTS5 triggers; `chunk_uid` is the stable join key across SQLite and Chroma.
 - Embeddings use OpenAI (`text-embedding-3-small` default) with retries and token-aware batching; stored in SQLite for fallback retrieval.
 - Vector search uses local Chroma collections; hybrid retrieval uses RRF fusion with optional fallback to SQLite embeddings.
-- CLI supports answer generation with citation prompts via `--generate`; citation parsing/validation utilities live in `arxiv_rag/verify.py` (CLI `--verify` still pending).
+- CLI supports answer generation via `--generate` and deterministic citation/quote verification via `--verify`.
 - Citation prompt templates live under `arxiv_rag/prompts/` and are bundled with the package.
 
 ## Features
@@ -260,7 +267,7 @@ uv run python -m arxiv_rag.cli inspect --db data/arxiv_rag.db
 
 - Vector mode relies on Chroma; hybrid mode can fall back to SQLite embeddings if Chroma is missing or empty.
 - `chunk_uid` is now the canonical cross-index join key; chunk backfills keep older rows consistent.
-- Query output supports retrieval-only snippets or `--generate` for cited answers; citation parsing/validation utilities are implemented (CLI `--verify` still pending).
+- Query output supports retrieval-only snippets or `--generate` for cited answers; `--verify` validates citations and quotes.
 - Query logging is still not implemented.
 - Spec updates: Phase 3 acceptance criteria now define citation validation, `--verify` behavior, and optional LLM-judge schema.
 

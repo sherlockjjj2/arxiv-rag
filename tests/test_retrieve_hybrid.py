@@ -12,7 +12,11 @@ def _load_modules():
         sys.path.insert(0, str(repo_root))
 
     from arxiv_rag.chroma_client import ChromaConfig
-    from arxiv_rag.db import ensure_chunks_schema, normalize_embedding, serialize_embedding
+    from arxiv_rag.db import (
+        ensure_chunks_schema,
+        normalize_embedding,
+        serialize_embedding,
+    )
     from arxiv_rag.retrieve import ChunkResult, _fuse_rrf, search_hybrid
 
     return (
@@ -171,7 +175,4 @@ def test_search_hybrid_falls_back_to_sqlite(tmp_path: Path) -> None:
 
     assert output.results
     assert any("falling back" in warning for warning in output.warnings)
-    assert any(
-        prov.backend == "vector"
-        for prov in output.results[0].provenance
-    )
+    assert any(prov.backend == "vector" for prov in output.results[0].provenance)
