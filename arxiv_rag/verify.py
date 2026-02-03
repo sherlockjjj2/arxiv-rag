@@ -218,6 +218,18 @@ def validate_citations(
                 )
             )
 
+        if citation.page_number < 1:
+            errors.append(
+                VerifyError(
+                    code="page_out_of_range",
+                    message=(
+                        f"Page {citation.page_number} out of range for "
+                        f"{citation.paper_id} (page numbers start at 1)"
+                    ),
+                    citation_id=citation.citation_id,
+                )
+            )
+
         if max_pages_by_paper is not None:
             max_pages = max_pages_by_paper.get(citation.paper_id)
             if max_pages is None:
