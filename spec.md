@@ -248,6 +248,13 @@ collection = chroma_client.create_collection(
 }
 ```
 
+### MVP Embeddings (SQLite + In-Memory Cosine)
+
+- Embeddings are generated with `text-embedding-3-small`.
+- Vectors are stored in `chunks.embedding` as float32 bytes (normalized).
+- Vector retrieval loads embeddings from SQLite and computes cosine similarity in memory.
+- This keeps the MVP dependency footprint small while remaining compatible with future vector DBs.
+
 ---
 
 ## 5. Processing Pipeline

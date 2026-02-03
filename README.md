@@ -45,10 +45,22 @@ uv run python arxiv_rag/parse.py --pdf data/arxiv-papers/2301.12345v1.pdf
 uv run python arxiv_rag/chunk.py --parsed data/parsed/2301.12345v1.json --db data/arxiv_rag.db
 ```
 
-5. Query the BM25 index:
+5. Generate embeddings:
+
+```bash
+uv run arxiv-rag embed --db data/arxiv_rag.db
+```
+
+6. Query the BM25 index:
 
 ```bash
 uv run arxiv-rag query "dense retrieval" --top-k 5
+```
+
+7. Query vector embeddings:
+
+```bash
+uv run arxiv-rag query "dense retrieval" --top-k 5 --mode vector
 ```
 
 ## CLI usage
@@ -130,6 +142,18 @@ Include BM25 scores:
 uv run arxiv-rag query "dense retrieval" --show-score
 ```
 
+### Embed chunks with OpenAI
+
+```bash
+uv run arxiv-rag embed --db data/arxiv_rag.db
+```
+
+### Query vector embeddings
+
+```bash
+uv run arxiv-rag query "dense retrieval" --mode vector --top-k 5
+```
+
 ## Data locations
 
 - PDFs: `data/arxiv-papers/`
@@ -139,10 +163,10 @@ uv run arxiv-rag query "dense retrieval" --show-score
 
 ## Notes
 
-### 2026-02-22
+### 2026-02-03
 
 - Current implementation is CLI-only: download/search arXiv, parse PDFs, chunk into SQLite, and query via FTS5 (BM25).
-- Embeddings are not generated or used; no vector DB or hybrid retrieval is implemented.
+- Embeddings are now generated locally and stored in SQLite for in-memory cosine retrieval.
 - No LLM answer generation or citation verification is implemented.
 - Query logging is not implemented.
 - Spec now defines a canonical `chunk_uid` for cross-index joins (SQLite ↔ vector DB).
