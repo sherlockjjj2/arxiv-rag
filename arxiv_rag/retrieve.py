@@ -430,41 +430,51 @@ def search_hybrid(
 
     vector_results: list[ChunkResult] = []
     if vector_weight > 0:
-        query_embedding = embeddings_client.embed([question]).embeddings[0]
         try:
-            vector_results = search_vector_chroma_with_embedding(
-                query_embedding,
-                top_k=candidate_k,
-                db_path=db_path,
-                chroma_config=chroma_config,
-                chroma_store=chroma_store,
-            )
-            if not vector_results and use_sqlite_fallback:
-                warnings.append(
-                    "Chroma returned no results; falling back to SQLite embeddings."
-                )
-                vector_results = search_vector_with_embedding(
-                    query_embedding,
-                    top_k=candidate_k,
-                    db_path=db_path,
-                )
-        except ImportError as exc:
-            if use_sqlite_fallback:
-                warnings.append(
-                    f"Chroma unavailable ({exc}); falling back to SQLite embeddings."
-                )
-                vector_results = search_vector_with_embedding(
-                    query_embedding,
-                    top_k=candidate_k,
-                    db_path=db_path,
-                )
-            else:
-                warnings.append(f"Chroma unavailable ({exc}); skipping vector search.")
-
-        if use_sqlite_fallback and vector_results == []:
+            query_embedding = embeddings_client.embed([question]).embeddings[0]
+        except Exception as exc:  # pragma: no cover - defensive for API failures
             warnings.append(
-                "SQLite embedding search returned no results; check stored embeddings."
+                f"Embedding failed ({exc}); skipping vector search."
             )
+            query_embedding = None
+
+        if query_embedding is not None:
+            try:
+                vector_results = search_vector_chroma_with_embedding(
+                    query_embedding,
+                    top_k=candidate_k,
+                    db_path=db_path,
+                    chroma_config=chroma_config,
+                    chroma_store=chroma_store,
+                )
+                if not vector_results and use_sqlite_fallback:
+                    warnings.append(
+                        "Chroma returned no results; falling back to SQLite embeddings."
+                    )
+                    vector_results = search_vector_with_embedding(
+                        query_embedding,
+                        top_k=candidate_k,
+                        db_path=db_path,
+                    )
+            except ImportError as exc:
+                if use_sqlite_fallback:
+                    warnings.append(
+                        f"Chroma unavailable ({exc}); falling back to SQLite embeddings."
+                    )
+                    vector_results = search_vector_with_embedding(
+                        query_embedding,
+                        top_k=candidate_k,
+                        db_path=db_path,
+                    )
+                else:
+                    warnings.append(
+                        f"Chroma unavailable ({exc}); skipping vector search."
+                    )
+
+            if use_sqlite_fallback and vector_results == []:
+                warnings.append(
+                    "SQLite embedding search returned no results; check stored embeddings."
+                )
 
     results = _fuse_rrf(
         fts_results,
