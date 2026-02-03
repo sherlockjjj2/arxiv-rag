@@ -32,6 +32,7 @@ def _create_fts_db(db_path: Path) -> None:
             """
             CREATE TABLE chunks (
                 chunk_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chunk_uid TEXT NOT NULL,
                 paper_id TEXT NOT NULL,
                 doc_id TEXT NOT NULL,
                 page_number INTEGER NOT NULL,
@@ -56,6 +57,7 @@ def _create_fts_db(db_path: Path) -> None:
         rows = [
             (
                 1,
+                "uid-1",
                 "2312.10997",
                 "doc1",
                 3,
@@ -67,6 +69,7 @@ def _create_fts_db(db_path: Path) -> None:
             ),
             (
                 2,
+                "uid-2",
                 "2312.10997",
                 "doc1",
                 5,
@@ -81,6 +84,7 @@ def _create_fts_db(db_path: Path) -> None:
             """
             INSERT INTO chunks (
                 chunk_id,
+                chunk_uid,
                 paper_id,
                 doc_id,
                 page_number,
@@ -89,13 +93,13 @@ def _create_fts_db(db_path: Path) -> None:
                 char_start,
                 char_end,
                 token_count
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             rows,
         )
         conn.executemany(
             "INSERT INTO chunks_fts(rowid, text) VALUES (?, ?)",
-            [(1, rows[0][5]), (2, rows[1][5])],
+            [(1, rows[0][6]), (2, rows[1][6])],
         )
         conn.commit()
 

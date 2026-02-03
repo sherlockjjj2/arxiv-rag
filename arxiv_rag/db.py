@@ -5,6 +5,8 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+from arxiv_rag.chunk_ids import compute_chunk_uid
+
 _PAPERS_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS papers (
     paper_id TEXT PRIMARY KEY,
@@ -25,6 +27,7 @@ CREATE TABLE IF NOT EXISTS papers (
 _CHUNKS_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS chunks (
     chunk_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chunk_uid TEXT NOT NULL UNIQUE,
     paper_id TEXT NOT NULL,
     doc_id TEXT NOT NULL,
     page_number INTEGER NOT NULL,
@@ -97,12 +100,56 @@ def ensure_chunks_schema(conn: sqlite3.Connection) -> None:
     """Ensure the chunks and FTS tables exist."""
 
     conn.execute(_CHUNKS_TABLE_SQL)
+    _ensure_chunk_uid_column(conn)
     conn.execute("CREATE INDEX IF NOT EXISTS chunks_paper_id_idx ON chunks(paper_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS chunks_doc_id_idx ON chunks(doc_id)")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS chunks_chunk_uid_uidx ON chunks(chunk_uid)"
+    )
     conn.execute(_CHUNKS_FTS_SQL)
     conn.execute(_CHUNKS_AI_TRIGGER_SQL)
     conn.execute(_CHUNKS_AD_TRIGGER_SQL)
     conn.execute(_CHUNKS_AU_TRIGGER_SQL)
+
+
+def _ensure_chunk_uid_column(conn: sqlite3.Connection) -> None:
+    """Ensure the chunks table has a populated chunk_uid column."""
+
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(chunks)")}
+    if "chunk_uid" not in columns:
+        conn.execute("ALTER TABLE chunks ADD COLUMN chunk_uid TEXT")
+
+    _backfill_chunk_uids(conn)
+
+
+def _backfill_chunk_uids(conn: sqlite3.Connection) -> None:
+    """Backfill chunk_uids for rows missing a value."""
+
+    rows = conn.execute(
+        """
+        SELECT chunk_id, doc_id, page_number, chunk_index, char_start, char_end
+        FROM chunks
+        WHERE chunk_uid IS NULL OR chunk_uid = ''
+        """
+    ).fetchall()
+    if not rows:
+        return
+
+    updates: list[tuple[str, int]] = []
+    for chunk_id, doc_id, page_number, chunk_index, char_start, char_end in rows:
+        chunk_uid = compute_chunk_uid(
+            doc_id=doc_id,
+            page_number=page_number,
+            chunk_index=chunk_index,
+            char_start=char_start,
+            char_end=char_end,
+        )
+        updates.append((chunk_uid, chunk_id))
+
+    conn.executemany(
+        "UPDATE chunks SET chunk_uid = ? WHERE chunk_id = ?",
+        updates,
+    )
 
 
 def ensure_papers_db(db_path: Path) -> None:
