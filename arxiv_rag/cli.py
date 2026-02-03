@@ -11,15 +11,19 @@ from uuid import uuid4
 
 import typer
 from dotenv import load_dotenv
+from openai import APIError, APITimeoutError, RateLimitError
 from tiktoken import Encoding, get_encoding
 
 from arxiv_rag.chroma_client import ChromaConfig
 from arxiv_rag.chroma_inspect import inspect_chroma_counts
 from arxiv_rag.db import normalize_embedding, serialize_embedding
 from arxiv_rag.embeddings_client import EmbeddingsClient, EmbeddingsConfig
+from arxiv_rag.generate import Chunk as GenerationChunk, generate_answer
 from arxiv_rag.indexer import index_chunks
 from arxiv_rag.retrieve import (
+    ChunkResult,
     format_snippet,
+    HybridChunkResult,
     search_fts,
     search_hybrid,
     search_vector_chroma,
@@ -79,55 +83,21 @@ def _run_query(
         typer.echo("snippet_chars must be > 0", err=True)
         raise typer.Exit(code=1)
 
-    try:
-        if mode == "fts":
-            results = search_fts(question, top_k=top_k, db_path=db)
-        elif mode == "vector":
-            embeddings_client = EmbeddingsClient(EmbeddingsConfig(model=model))
-            chroma_config = ChromaConfig(
-                persist_dir=chroma_dir,
-                collection_name=collection,
-                distance=distance,
-            )
-            results = search_vector_chroma(
-                question,
-                top_k=top_k,
-                db_path=db,
-                embeddings_client=embeddings_client,
-                chroma_config=chroma_config,
-            )
-        else:
-            embeddings_client = EmbeddingsClient(EmbeddingsConfig(model=model))
-            chroma_config = ChromaConfig(
-                persist_dir=chroma_dir,
-                collection_name=collection,
-                distance=distance,
-            )
-            output = search_hybrid(
-                question,
-                top_k=top_k,
-                db_path=db,
-                embeddings_client=embeddings_client,
-                chroma_config=chroma_config,
-                rrf_k=rrf_k,
-                fts_weight=rrf_weight_fts,
-                vector_weight=rrf_weight_vector,
-            )
-            for warning in output.warnings:
-                typer.echo(f"Warning: {warning}", err=True)
-            results = output.results
-    except FileNotFoundError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(code=1) from exc
-    except ValueError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(code=1) from exc
-    except ImportError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(code=1) from exc
-    except sqlite3.Error as exc:
-        typer.echo(f"SQLite error: {exc}", err=True)
-        raise typer.Exit(code=2) from exc
+    results, warnings = _run_retrieval(
+        question=question,
+        top_k=top_k,
+        mode=mode,
+        model=model,
+        db=db,
+        chroma_dir=chroma_dir,
+        collection=collection,
+        distance=distance,
+        rrf_k=rrf_k,
+        rrf_weight_fts=rrf_weight_fts,
+        rrf_weight_vector=rrf_weight_vector,
+    )
+    for warning in warnings:
+        typer.echo(f"Warning: {warning}", err=True)
 
     if not results:
         typer.echo("No results found.")
@@ -170,6 +140,106 @@ def _run_query(
             typer.echo()
 
 
+def _retrieve_results(
+    *,
+    question: str,
+    top_k: int,
+    mode: Literal["fts", "vector", "hybrid"],
+    model: str,
+    db: Path,
+    chroma_dir: Path,
+    collection: str,
+    distance: Literal["cosine", "l2", "ip"],
+    rrf_k: int,
+    rrf_weight_fts: float,
+    rrf_weight_vector: float,
+) -> tuple[list[ChunkResult | HybridChunkResult], list[str]]:
+    """Retrieve chunks for a query without printing results."""
+
+    warnings: list[str] = []
+    if mode == "fts":
+        results = search_fts(question, top_k=top_k, db_path=db)
+    elif mode == "vector":
+        embeddings_client = EmbeddingsClient(EmbeddingsConfig(model=model))
+        chroma_config = ChromaConfig(
+            persist_dir=chroma_dir,
+            collection_name=collection,
+            distance=distance,
+        )
+        results = search_vector_chroma(
+            question,
+            top_k=top_k,
+            db_path=db,
+            embeddings_client=embeddings_client,
+            chroma_config=chroma_config,
+        )
+    else:
+        embeddings_client = EmbeddingsClient(EmbeddingsConfig(model=model))
+        chroma_config = ChromaConfig(
+            persist_dir=chroma_dir,
+            collection_name=collection,
+            distance=distance,
+        )
+        output = search_hybrid(
+            question,
+            top_k=top_k,
+            db_path=db,
+            embeddings_client=embeddings_client,
+            chroma_config=chroma_config,
+            rrf_k=rrf_k,
+            fts_weight=rrf_weight_fts,
+            vector_weight=rrf_weight_vector,
+        )
+        warnings.extend(output.warnings)
+        results = output.results
+
+    return results, warnings
+
+
+def _run_retrieval(
+    *,
+    question: str,
+    top_k: int,
+    mode: Literal["fts", "vector", "hybrid"],
+    model: str,
+    db: Path,
+    chroma_dir: Path,
+    collection: str,
+    distance: Literal["cosine", "l2", "ip"],
+    rrf_k: int,
+    rrf_weight_fts: float,
+    rrf_weight_vector: float,
+) -> tuple[list[ChunkResult | HybridChunkResult], list[str]]:
+    """Run retrieval with CLI-oriented error handling."""
+
+    try:
+        return _retrieve_results(
+            question=question,
+            top_k=top_k,
+            mode=mode,
+            model=model,
+            db=db,
+            chroma_dir=chroma_dir,
+            collection=collection,
+            distance=distance,
+            rrf_k=rrf_k,
+            rrf_weight_fts=rrf_weight_fts,
+            rrf_weight_vector=rrf_weight_vector,
+        )
+    except FileNotFoundError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    except ImportError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    except sqlite3.Error as exc:
+        typer.echo(f"SQLite error: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+
 @app.command()
 def query(
     question: str,
@@ -207,6 +277,14 @@ def query(
         240,
         help="Maximum characters to display per snippet.",
     ),
+    generate: bool = typer.Option(
+        False,
+        help="Generate a cited answer using retrieved chunks.",
+    ),
+    generate_model: str = typer.Option(
+        "gpt-4o-mini",
+        help="Model for answer generation.",
+    ),
     show_score: bool = typer.Option(
         False,
         help="Include score in the output.",
@@ -229,6 +307,59 @@ def query(
     ),
 ) -> None:
     """Query SQLite for matching chunks via FTS, vector, or hybrid retrieval."""
+
+    if generate:
+        results, warnings = _run_retrieval(
+            question=question,
+            top_k=top_k,
+            mode=mode,
+            model=model,
+            db=db,
+            chroma_dir=chroma_dir,
+            collection=collection,
+            distance=distance,
+            rrf_k=rrf_k,
+            rrf_weight_fts=rrf_weight_fts,
+            rrf_weight_vector=rrf_weight_vector,
+        )
+        for warning in warnings:
+            typer.echo(f"Warning: {warning}", err=True)
+
+        if not results:
+            typer.echo("No results found.")
+            raise typer.Exit(code=0)
+
+        chunks = [
+            GenerationChunk(
+                chunk_uid=result.chunk_uid,
+                paper_id=result.paper_id,
+                page_number=result.page_number,
+                text=result.text,
+            )
+            for result in results
+        ]
+
+        try:
+            answer = generate_answer(
+                question,
+                chunks,
+                model=generate_model,
+            )
+        except ValueError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=1) from exc
+        except FileNotFoundError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=2) from exc
+        except (APIError, APITimeoutError, RateLimitError) as exc:
+            typer.echo(f"OpenAI error: {exc}", err=True)
+            raise typer.Exit(code=2) from exc
+        except RuntimeError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=2) from exc
+
+        typer.echo(answer)
+        return
 
     _run_query(
         question=question,
