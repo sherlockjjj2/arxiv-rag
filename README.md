@@ -242,7 +242,7 @@ uv run python -m arxiv_rag.cli inspect --db data/arxiv_rag.db
 - SQLite schema includes `papers`, `chunks`, and FTS5 triggers; `chunk_uid` is the stable join key across SQLite and Chroma.
 - Embeddings use OpenAI (`text-embedding-3-small` default) with retries and token-aware batching; stored in SQLite for fallback retrieval.
 - Vector search uses local Chroma collections; hybrid retrieval uses RRF fusion with optional fallback to SQLite embeddings.
-- CLI supports answer generation with citation prompts via `--generate`; citation verification is not implemented yet.
+- CLI supports answer generation with citation prompts via `--generate`; citation parsing/validation utilities live in `arxiv_rag/verify.py` (CLI `--verify` still pending).
 - Citation prompt templates live under `arxiv_rag/prompts/` and are bundled with the package.
 
 ## Features
@@ -260,7 +260,7 @@ uv run python -m arxiv_rag.cli inspect --db data/arxiv_rag.db
 
 - Vector mode relies on Chroma; hybrid mode can fall back to SQLite embeddings if Chroma is missing or empty.
 - `chunk_uid` is now the canonical cross-index join key; chunk backfills keep older rows consistent.
-- Query output supports retrieval-only snippets or `--generate` for cited answers; citation verification is not implemented yet.
+- Query output supports retrieval-only snippets or `--generate` for cited answers; citation parsing/validation utilities are implemented (CLI `--verify` still pending).
 - Query logging is still not implemented.
 - Spec updates: Phase 3 acceptance criteria now define citation validation, `--verify` behavior, and optional LLM-judge schema.
 

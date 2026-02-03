@@ -170,6 +170,66 @@ def ensure_papers_db(db_path: Path) -> None:
         conn.commit()
 
 
+def load_paper_ids(db_path: Path) -> set[str]:
+    """Load known arXiv paper IDs from the papers table.
+
+    Args:
+        db_path: SQLite database path.
+    Returns:
+        Set of paper IDs present in the database.
+    Raises:
+        FileNotFoundError: If the database path does not exist.
+        sqlite3.Error: If the query fails.
+    """
+
+    if not db_path.exists():
+        raise FileNotFoundError(f"Database not found: {db_path}")
+
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute("SELECT paper_id FROM papers").fetchall()
+    return {row[0] for row in rows}
+
+
+def load_page_numbers_by_paper(
+    db_path: Path,
+    paper_ids: Sequence[str],
+) -> dict[str, set[int]]:
+    """Load page numbers that exist in the chunks table for each paper ID.
+
+    Args:
+        db_path: SQLite database path.
+        paper_ids: Paper IDs to filter the lookup.
+    Returns:
+        Mapping from paper_id to a set of page numbers present in chunks.
+    Raises:
+        FileNotFoundError: If the database path does not exist.
+        sqlite3.Error: If the query fails.
+    """
+
+    if not db_path.exists():
+        raise FileNotFoundError(f"Database not found: {db_path}")
+
+    unique_ids = sorted({paper_id for paper_id in paper_ids if paper_id})
+    if not unique_ids:
+        return {}
+
+    placeholders = ", ".join("?" for _ in unique_ids)
+    sql = (
+        "SELECT paper_id, page_number "
+        "FROM chunks "
+        f"WHERE paper_id IN ({placeholders})"
+    )
+
+    pages_by_paper: dict[str, set[int]] = {paper_id: set() for paper_id in unique_ids}
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(sql, unique_ids).fetchall()
+
+    for paper_id, page_number in rows:
+        pages_by_paper.setdefault(paper_id, set()).add(page_number)
+
+    return pages_by_paper
+
+
 def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
     row = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
