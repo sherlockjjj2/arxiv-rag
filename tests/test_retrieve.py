@@ -126,6 +126,12 @@ def test_format_snippet_truncates() -> None:
     assert snippet == "hello w..."
 
 
+def test_build_fts_query_relaxed() -> None:
+    retrieve = _load_retrieve_module()
+    query = retrieve.build_fts_query("What are the typical Agent patterns")
+    assert query == "(typical AND patterns) AND (Agent)"
+
+
 def test_query_cli_outputs_snippet(tmp_path: Path) -> None:
     db_path = tmp_path / "arxiv_rag.db"
     _create_fts_db(db_path)
