@@ -145,6 +145,7 @@ uv run arxiv-rag query "dense retrieval" --show-score
 - Embeddings are not generated or used; no vector DB or hybrid retrieval is implemented.
 - No LLM answer generation or citation verification is implemented.
 - Query logging is not implemented.
+- Spec now defines a canonical `chunk_uid` for cross-index joins (SQLite ↔ vector DB).
 
 ## Development notes
 

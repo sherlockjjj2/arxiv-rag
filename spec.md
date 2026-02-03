@@ -3,7 +3,7 @@
 **Version**: 1.0  
 **Author**: Joseph Fang  
 **Status**: Draft  
-**Last Updated**: 2026-02-01
+**Last Updated**: 2026-02-03
 
 ---
 
@@ -145,6 +145,7 @@ CREATE TABLE papers (
 -- Chunks with page-level granularity
 CREATE TABLE chunks (
     chunk_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chunk_uid TEXT NOT NULL UNIQUE, -- Stable ID for cross-index joins
     paper_id TEXT NOT NULL,
     doc_id TEXT NOT NULL,
     page_number INTEGER NOT NULL,
@@ -181,12 +182,40 @@ CREATE TRIGGER chunks_au AFTER UPDATE OF text ON chunks BEGIN
     INSERT INTO chunks_fts(rowid, text) VALUES (new.chunk_id, new.text);
 END;
 
+### Canonical Chunk Schema (Logical)
+
+Use a stable `chunk_uid` as the **cross-index join key** (SQLite ↔ Chroma ↔ FAISS).
+`chunk_id` remains a SQLite-internal row identifier only.
+
+Recommended fields:
+
+```json
+{
+  "chunk_uid": "sha1(doc_id:page_number:chunk_index:char_start:char_end)",
+  "paper_id": "2312.10997",
+  "doc_id": "b1946ac92492d2347c6235b4d2611184",
+  "page_number": 5,
+  "chunk_index": 2,
+  "text": "chunk text...",
+  "char_start": 1203,
+  "char_end": 1875,
+  "token_count": 512
+}
+```
+
+Chunk UID options + trade-offs:
+
+- **Readable key**: `"{doc_id}_p{page_number}_c{chunk_index}"`  
+  Easy to debug, but long; collisions if `doc_id` is truncated.
+- **Hashed key (recommended)**: `sha1("{doc_id}:{page_number}:{chunk_index}:{char_start}:{char_end}")`  
+  Fixed length and stable; harder to eyeball but safe for joins across indexes.
+
 -- Query log for evaluation
 CREATE TABLE query_log (
     query_id INTEGER PRIMARY KEY AUTOINCREMENT,
     query_text TEXT NOT NULL,
     timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
-    retrieved_chunks TEXT,          -- JSON array of chunk_ids
+    retrieved_chunks TEXT,          -- JSON array of chunk_uids
     answer TEXT,
     latency_ms INTEGER,
     model TEXT,
@@ -205,9 +234,10 @@ collection = chroma_client.create_collection(
 
 # Each document stores:
 {
-    "id": "b1946ac9_p5_c2",          # doc_id_page_chunk
+    "id": "sha1(doc_id:page:chunk_index:char_start:char_end)",  # chunk_uid
     "embedding": [...],              # from OpenAI
     "metadata": {
+        "chunk_uid": "sha1(doc_id:page:chunk_index:char_start:char_end)",
         "paper_id": "2312.10997",
         "doc_id": "b1946ac92492d2347c6235b4d2611184",
         "page": 5,
@@ -272,8 +302,9 @@ Parse JSON (doc_id, pages)
   │    ├─ update pdf_path/metadata on re-download
   │    └─ if paper_id exists with different doc_id: delete old chunks/vectors
   ├─ chunk pages using (paper_id, doc_id)
-  ├─ insert chunks (unique on doc_id + page_number + chunk_index)
-  └─ insert vectors with id = doc_id_page_chunk
+  ├─ compute chunk_uid for each chunk
+  ├─ insert chunks (unique on chunk_uid; also unique on doc_id + page_number + chunk_index)
+  └─ insert vectors with id = chunk_uid
 ```
 
 ## Design decisions\*\*
@@ -291,6 +322,7 @@ Parse JSON (doc_id, pages)
 
 ```python
 from tiktoken import get_encoding
+import hashlib
 
 def chunk_page(
     page_text: str,
@@ -319,8 +351,11 @@ def chunk_page(
         # Calculate character offsets (approximate)
         char_start = len(enc.decode(tokens[:start]))
         char_end = char_start + len(chunk_text)
+        chunk_uid_source = f"{doc_id}:{page_num}:{chunk_idx}:{char_start}:{char_end}"
+        chunk_uid = hashlib.sha1(chunk_uid_source.encode("utf-8")).hexdigest()
 
         chunks.append({
+            "chunk_uid": chunk_uid,
             "paper_id": paper_id,
             "doc_id": doc_id,
             "page_number": page_num,
@@ -390,31 +425,32 @@ def hybrid_search(
     k = 60  # RRF constant
     scores = {}
 
-    for rank, chunk_id in enumerate(bm25_results):
-        scores[chunk_id] = scores.get(chunk_id, 0) + bm25_weight / (k + rank + 1)
+    for rank, chunk_uid in enumerate(bm25_results):
+        scores[chunk_uid] = scores.get(chunk_uid, 0) + bm25_weight / (k + rank + 1)
 
-    for rank, chunk_id in enumerate(vector_results['ids'][0]):
-        scores[chunk_id] = scores.get(chunk_id, 0) + vector_weight / (k + rank + 1)
+    for rank, chunk_uid in enumerate(vector_results['ids'][0]):
+        scores[chunk_uid] = scores.get(chunk_uid, 0) + vector_weight / (k + rank + 1)
 
     # Sort by combined score
     ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:top_k]
 
     # Fetch full chunk data
-    return [get_chunk_with_metadata(chunk_id) for chunk_id, _ in ranked]
+    return [get_chunk_with_metadata(chunk_uid) for chunk_uid, _ in ranked]
 ```
 
 ### 6.2 FTS5 Search
 
 ```python
-def search_fts(query: str, top_k: int = 20) -> list[int]:
+def search_fts(query: str, top_k: int = 20) -> list[str]:
     """
     BM25-style search using SQLite FTS5.
-    Returns chunk_ids ordered by relevance.
+    Returns chunk_uids ordered by relevance.
     """
     # FTS5 uses BM25 by default
     sql = """
-        SELECT chunk_id, bm25(chunks_fts) as score
+        SELECT chunks.chunk_uid, bm25(chunks_fts) as score
         FROM chunks_fts
+        JOIN chunks ON chunks_fts.rowid = chunks.chunk_id
         WHERE chunks_fts MATCH ?
         ORDER BY score
         LIMIT ?
@@ -596,7 +632,7 @@ Output as JSON: [{{"question": "...", "expected_answer": "...", "difficulty": "f
 
     # Add ground truth chunk reference
     for qa in qa_pairs:
-        qa['ground_truth_chunk_id'] = chunk['chunk_id']
+        qa['ground_truth_chunk_uid'] = chunk['chunk_uid']
         qa['ground_truth_paper'] = chunk['paper_id']
         qa['ground_truth_page'] = chunk['page_number']
 
@@ -624,7 +660,7 @@ Use `--feedback` flag to mark good/bad answers, then review.
       "query": "What is the difference between sparse and dense retrieval?",
       "difficulty": "factual",
       "ground_truth": {
-        "chunk_ids": [142, 156, 203],
+        "chunk_uids": ["...", "...", "..."],
         "papers": ["2312.10997", "2305.14283"],
         "pages": [[3, 4], [7]],
         "expected_topics": ["BM25", "dense vectors", "BERT encoders"]
@@ -654,17 +690,17 @@ def evaluate(eval_set: list[dict]) -> dict:
     for item in eval_set:
         # Retrieval metrics
         retrieved = hybrid_search(item['query'], top_k=10)
-        retrieved_ids = set(c['chunk_id'] for c in retrieved)
-        ground_truth_ids = set(item['ground_truth']['chunk_ids'])
+        retrieved_ids = [c['chunk_uid'] for c in retrieved]
+        ground_truth_ids = set(item['ground_truth']['chunk_uids'])
 
         # Recall@K: what fraction of ground truth was retrieved?
-        recall_5 = len(retrieved_ids[:5] & ground_truth_ids) / len(ground_truth_ids)
-        recall_10 = len(retrieved_ids & ground_truth_ids) / len(ground_truth_ids)
+        recall_5 = len(set(retrieved_ids[:5]) & ground_truth_ids) / len(ground_truth_ids)
+        recall_10 = len(set(retrieved_ids[:10]) & ground_truth_ids) / len(ground_truth_ids)
 
         # MRR: reciprocal rank of first correct result
         mrr = 0
         for rank, c in enumerate(retrieved, 1):
-            if c['chunk_id'] in ground_truth_ids:
+            if c['chunk_uid'] in ground_truth_ids:
                 mrr = 1.0 / rank
                 break
 

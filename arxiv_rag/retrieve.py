@@ -12,6 +12,7 @@ from pathlib import Path
 class ChunkResult:
     """Chunk search result from the FTS index."""
 
+    chunk_uid: str
     chunk_id: int
     paper_id: str
     page_number: int
@@ -88,6 +89,7 @@ def search_fts(
 
     sql = """
         SELECT
+            chunks.chunk_uid,
             chunks.chunk_id,
             chunks.paper_id,
             chunks.page_number,
@@ -105,11 +107,12 @@ def search_fts(
 
     return [
         ChunkResult(
-            chunk_id=row[0],
-            paper_id=row[1],
-            page_number=row[2],
-            text=row[3],
-            score=row[4],
+            chunk_uid=row[0],
+            chunk_id=row[1],
+            paper_id=row[2],
+            page_number=row[3],
+            text=row[4],
+            score=row[5],
         )
         for row in rows
     ]

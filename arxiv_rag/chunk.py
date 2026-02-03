@@ -10,6 +10,7 @@ from pathlib import Path
 from tiktoken import Encoding, get_encoding
 
 from arxiv_rag.arxiv_ids import base_id_from_versioned, is_valid_base_id
+from arxiv_rag.chunk_ids import compute_chunk_uid
 from arxiv_rag.db import ensure_chunks_schema, ensure_papers_schema
 
 LOGGER = logging.getLogger(__name__)
@@ -45,6 +46,7 @@ class ParsedDocument:
 class ChunkRecord:
     """Chunk metadata for storage."""
 
+    chunk_uid: str
     paper_id: str
     doc_id: str
     page_number: int
@@ -58,6 +60,7 @@ class ChunkRecord:
         """Return the chunk as a SQLite row tuple."""
 
         return (
+            self.chunk_uid,
             self.paper_id,
             self.doc_id,
             self.page_number,
@@ -124,7 +127,7 @@ def chunk_page(
     doc_id: str,
     config: ChunkConfig,
     encoder: Encoding,
-) -> list[ChunkRecord]:
+) -> list[ChunkRecord]:  # sourcery skip: for-append-to-extend
     """Chunk text by tokens with overlap for a single page.
 
     Args:
@@ -168,9 +171,17 @@ def chunk_page(
         chunk_text = "".join(token_texts[start:end])
         char_start = char_offsets[start]
         char_end = char_offsets[end]
+        chunk_uid = compute_chunk_uid(
+            doc_id=doc_id,
+            page_number=page_num,
+            chunk_index=chunk_idx,
+            char_start=char_start,
+            char_end=char_end,
+        )
 
         chunks.append(
             ChunkRecord(
+                chunk_uid=chunk_uid,
                 paper_id=paper_id,
                 doc_id=doc_id,
                 page_number=page_num,
@@ -313,6 +324,7 @@ def _ingest_chunks(
     conn.executemany(
         """
         INSERT INTO chunks (
+            chunk_uid,
             paper_id,
             doc_id,
             page_number,
@@ -321,7 +333,7 @@ def _ingest_chunks(
             char_start,
             char_end,
             token_count
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [chunk.as_row() for chunk in chunks],
     )
