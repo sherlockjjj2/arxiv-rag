@@ -8,6 +8,9 @@ CLI utilities for downloading arXiv PDFs, parsing text, chunking into SQLite FTS
 - Quickstart
 - CLI usage
 - Data locations
+- Current implementation
+- Features
+- Today's notes
 - Development notes
 - Testing
 
@@ -222,15 +225,32 @@ uv run python -m arxiv_rag.cli inspect --db data/arxiv_rag.db
 - SQLite DB: `data/arxiv_rag.db`
 - Chroma persistence: `data/chroma/`
 
-## Notes
+## Current implementation
+
+- CLI-only pipeline: search/download arXiv PDFs, parse with PyMuPDF, chunk into SQLite, and retrieve via FTS/vector/hybrid modes.
+- SQLite schema includes `papers`, `chunks`, and FTS5 triggers; `chunk_uid` is the stable join key across SQLite and Chroma.
+- Embeddings use OpenAI (`text-embedding-3-small` default) with retries and token-aware batching; stored in SQLite for fallback retrieval.
+- Vector search uses local Chroma collections; hybrid retrieval uses RRF fusion with optional fallback to SQLite embeddings.
+- CLI output is snippet-only with page-level citations; no answer generation or citation verification yet.
+
+## Features
+
+- Search arXiv or download by base ID; track downloaded IDs in `data/arxiv-papers/arxiv_ids.txt`.
+- Metadata ingestion into SQLite during download, plus `--backfill-db` for existing PDFs.
+- PDF parsing with cleaning and optional repeated header/footer removal.
+- Token-based chunking with overlap, character offsets, and version-aware replacement when doc_id changes.
+- Retrieval modes: `fts`, `vector` (Chroma), `hybrid` (RRF) with optional scores and verbose provenance.
+- Chroma utilities: index embeddings, inspect per-doc_id counts, and delete-by-doc_id on re-index.
+
+## Today's notes
 
 ### 2026-02-03
 
-- Current implementation is CLI-only: download/search arXiv, parse PDFs, chunk into SQLite, and query via FTS5 (BM25).
-- Embeddings are generated and indexed into Chroma for vector search; SQLite remains the source of chunk text.
-- No LLM answer generation or citation verification is implemented.
-- Query logging is not implemented.
-- Spec now defines a canonical `chunk_uid` for cross-index joins (SQLite ↔ vector DB).
+- Vector mode relies on Chroma; hybrid mode can fall back to SQLite embeddings if Chroma is missing or empty.
+- `chunk_uid` is now the canonical cross-index join key; chunk backfills keep older rows consistent.
+- Query output is retrieval-only (snippets + citations); no LLM answers or citation verification.
+- Query logging is still not implemented.
+- Spec updates: Phase 3 acceptance criteria now define citation validation, `--verify` behavior, and optional LLM-judge schema.
 
 ## Development notes
 
