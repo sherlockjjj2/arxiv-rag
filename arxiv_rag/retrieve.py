@@ -106,7 +106,14 @@ def build_fts_query(question: str) -> str:
         Returns an empty string when no tokens are present.
     """
 
-    tokens = re.findall(r"[A-Za-z0-9]+", question)
+    tokens = re.findall(r"\w+", question, flags=re.UNICODE)
+    if not tokens:
+        raw_tokens = [token for token in re.split(r"\s+", question.strip()) if token]
+        tokens = [
+            re.sub(r"^[^\w]+|[^\w]+$", "", token, flags=re.UNICODE)
+            for token in raw_tokens
+        ]
+        tokens = [token for token in tokens if token]
     if not tokens:
         return ""
 
