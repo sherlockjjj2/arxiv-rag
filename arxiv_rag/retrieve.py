@@ -14,6 +14,7 @@ from arxiv_rag.chroma_client import ChromaConfig, ChromaStore
 from arxiv_rag.db import deserialize_embedding_array, normalize_embedding
 from arxiv_rag.embeddings_client import EmbeddingsClient
 
+
 @dataclass(frozen=True)
 class ChunkResult:
     """Chunk search result from the FTS index."""
@@ -196,9 +197,7 @@ def search_vector_chroma(
         return []
 
     scores_by_uid = {
-        uid: distances[index]
-        for index, uid in enumerate(ids)
-        if index < len(distances)
+        uid: distances[index] for index, uid in enumerate(ids) if index < len(distances)
     }
     with sqlite3.connect(db_path) as conn:
         return load_chunks_by_uid(conn, ids, scores_by_uid)

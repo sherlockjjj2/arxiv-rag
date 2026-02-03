@@ -65,7 +65,10 @@ def test_chunk_page_overlap_and_counts():
     for left, right in zip(chunks, chunks[1:]):
         left_tokens = encoder.encode(left.text)
         right_tokens = encoder.encode(right.text)
-        assert left_tokens[-config.overlap_tokens :] == right_tokens[: config.overlap_tokens]
+        assert (
+            left_tokens[-config.overlap_tokens :]
+            == right_tokens[: config.overlap_tokens]
+        )
 
 
 def test_chunk_page_skips_empty_text():

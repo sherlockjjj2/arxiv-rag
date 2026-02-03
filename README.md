@@ -164,6 +164,12 @@ Note: this stores embeddings in SQLite for the legacy in-memory vector search pa
 uv run arxiv-rag index --db data/arxiv_rag.db
 ```
 
+Notes:
+
+- By default, indexing deletes existing vectors for the doc_ids being indexed.
+- When `--limit` is set, deletes are skipped to avoid partial reindexing; use `--force-delete` to allow deletes.
+- When `--doc-id` is provided, deletes occur even if no chunks exist for that doc_id.
+
 ### Query vector embeddings (Chroma)
 
 ```bash

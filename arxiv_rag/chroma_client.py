@@ -83,6 +83,34 @@ class ChromaStore:
         collection.delete(where={"doc_id": doc_id})
         return len(ids)
 
+    def list_ids_by_doc_id(self, doc_id: str) -> list[str]:
+        """List vector IDs stored for a doc_id.
+
+        Args:
+            doc_id: Document identifier stored in Chroma metadata.
+        Returns:
+            List of vector IDs for the doc_id.
+        """
+
+        collection = self.get_or_create_collection()
+        result = collection.get(where={"doc_id": doc_id}, include=[])
+        return _flatten_ids(result.get("ids"))
+
+    def delete_by_ids(self, ids: Sequence[str]) -> int:
+        """Delete vectors by explicit IDs.
+
+        Args:
+            ids: Chroma IDs to delete.
+        Returns:
+            Number of vectors deleted (best-effort count).
+        """
+
+        if not ids:
+            return 0
+        collection = self.get_or_create_collection()
+        collection.delete(ids=list(ids))
+        return len(ids)
+
     def upsert_embeddings(
         self,
         *,
@@ -103,7 +131,9 @@ class ChromaStore:
         if len(ids) != len(embeddings) or len(ids) != len(metadatas):
             raise ValueError("ids, embeddings, and metadatas must be the same length")
         collection = self.get_or_create_collection()
-        collection.upsert(ids=list(ids), embeddings=list(embeddings), metadatas=list(metadatas))
+        collection.upsert(
+            ids=list(ids), embeddings=list(embeddings), metadatas=list(metadatas)
+        )
 
     def count_by_doc_id(self, doc_id: str) -> int:
         """Count vectors in Chroma for a doc_id.

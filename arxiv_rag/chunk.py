@@ -71,6 +71,7 @@ class ChunkRecord:
             self.token_count,
         )
 
+
 def _infer_paper_id(parsed_doc: ParsedDocument, parsed_path: Path) -> str | None:
     """Infer a base arXiv ID from the parsed JSON or PDF path."""
 
@@ -412,8 +413,7 @@ def main() -> int:
     db_path = Path(args.db)
     if not db_path.exists():
         print(
-            f"Database not found: {db_path}. "
-            "Run download.py with --db first.",
+            f"Database not found: {db_path}. Run download.py with --db first.",
             flush=True,
         )
         return 1

@@ -39,13 +39,16 @@ def build_chroma_metadata(row: ChunkRow) -> dict[str, object]:
         Metadata dict for Chroma storage.
     """
 
-    return {
+    metadata = {
         "doc_id": row.doc_id,
         "paper_id": row.paper_id,
         "page_number": row.page_number,
         "chunk_index": row.chunk_index,
         "token_count": row.token_count,
     }
+    if row.token_count is None:
+        metadata.pop("token_count")
+    return metadata
 
 
 def load_chunks(
@@ -160,6 +163,7 @@ def index_chunks(
     doc_ids: Sequence[str] | None = None,
     limit: int | None = None,
     batch_size: int | None = None,
+    force_delete: bool = False,
     chroma_store: ChromaStore | None = None,
     embeddings_client: EmbeddingsClient | None = None,
 ) -> int:
@@ -172,6 +176,7 @@ def index_chunks(
         doc_ids: Optional doc_ids to re-index.
         limit: Optional limit of chunks to index.
         batch_size: Optional fixed batch size; overrides token-based batching.
+        force_delete: When True, allow deletes even if limit is set.
         chroma_store: Optional Chroma store override for testing.
         embeddings_client: Optional embeddings client override for testing.
     Returns:
@@ -195,50 +200,93 @@ def index_chunks(
     with sqlite3.connect(db_path) as conn:
         chunks = load_chunks(conn, doc_ids=doc_ids, limit=limit)
 
+    requested_doc_ids = list(
+        dict.fromkeys(doc_ids or [chunk.doc_id for chunk in chunks])
+    )
+    allow_delete = limit is None or force_delete
+    if limit is not None and not force_delete and requested_doc_ids:
+        LOGGER.warning(
+            "limit=%s set; skipping delete for %s doc_ids. "
+            "Use force_delete=True to allow deletes.",
+            limit,
+            len(requested_doc_ids),
+        )
+
     if not chunks:
+        if allow_delete and doc_ids:
+            for doc_id in requested_doc_ids:
+                deleted = chroma_store.delete_by_doc_id(doc_id)
+                LOGGER.info("Deleted %s vectors for doc_id=%s", deleted, doc_id)
         return 0
 
-    doc_ids_to_delete = list(dict.fromkeys(doc_ids or [chunk.doc_id for chunk in chunks]))
-    for doc_id in doc_ids_to_delete:
-        deleted = chroma_store.delete_by_doc_id(doc_id)
-        LOGGER.info("Deleted %s vectors for doc_id=%s", deleted, doc_id)
-
-    batches = _build_batches(
-        chunks,
-        encoding=encoding,
-        max_request_tokens=embeddings_config.max_request_tokens,
-        max_input_tokens=embeddings_config.max_input_tokens,
-        batch_size=batch_size,
-    )
+    chunks_by_doc_id: dict[str, list[ChunkRow]] = {}
+    for chunk in chunks:
+        chunks_by_doc_id.setdefault(chunk.doc_id, []).append(chunk)
 
     total = len(chunks)
     processed = 0
     total_tokens = 0
-    for batch_index, batch in enumerate(batches, start=1):
-        batch_texts = [chunk.text for chunk in batch]
-        result = embeddings_client.embed(batch_texts)
-        if len(result.embeddings) != len(batch):
-            raise ValueError("Embedding response size mismatch.")
+    batch_index = 0
 
-        ids = [chunk.chunk_uid for chunk in batch]
-        embeddings = [normalize_embedding(embedding) for embedding in result.embeddings]
-        metadatas = [build_chroma_metadata(chunk) for chunk in batch]
-        chroma_store.upsert_embeddings(
-            ids=ids,
-            embeddings=embeddings,
-            metadatas=metadatas,
+    doc_ids_to_process = requested_doc_ids or list(chunks_by_doc_id.keys())
+    for doc_id in doc_ids_to_process:
+        doc_chunks = chunks_by_doc_id.get(doc_id, [])
+        if not doc_chunks:
+            if allow_delete and doc_ids:
+                deleted = chroma_store.delete_by_doc_id(doc_id)
+                LOGGER.info("Deleted %s vectors for doc_id=%s", deleted, doc_id)
+            continue
+
+        existing_ids = (
+            set(chroma_store.list_ids_by_doc_id(doc_id)) if allow_delete else set()
         )
-        processed += len(batch)
-        if result.total_tokens is not None:
-            total_tokens += result.total_tokens
-        LOGGER.info(
-            "batch=%s indexed=%s/%s batch_size=%s tokens=%s",
-            batch_index,
-            processed,
-            total,
-            len(batch),
-            result.total_tokens,
+        batches = _build_batches(
+            doc_chunks,
+            encoding=encoding,
+            max_request_tokens=embeddings_config.max_request_tokens,
+            max_input_tokens=embeddings_config.max_input_tokens,
+            batch_size=batch_size,
         )
+
+        for batch in batches:
+            batch_index += 1
+            batch_texts = [chunk.text for chunk in batch]
+            result = embeddings_client.embed(batch_texts)
+            if len(result.embeddings) != len(batch):
+                raise ValueError("Embedding response size mismatch.")
+
+            ids = [chunk.chunk_uid for chunk in batch]
+            embeddings = [
+                normalize_embedding(embedding) for embedding in result.embeddings
+            ]
+            metadatas = [build_chroma_metadata(chunk) for chunk in batch]
+            chroma_store.upsert_embeddings(
+                ids=ids,
+                embeddings=embeddings,
+                metadatas=metadatas,
+            )
+            processed += len(batch)
+            if result.total_tokens is not None:
+                total_tokens += result.total_tokens
+            LOGGER.info(
+                "batch=%s indexed=%s/%s batch_size=%s tokens=%s",
+                batch_index,
+                processed,
+                total,
+                len(batch),
+                result.total_tokens,
+            )
+
+        if allow_delete:
+            new_ids = {chunk.chunk_uid for chunk in doc_chunks}
+            stale_ids = sorted(existing_ids - new_ids)
+            if stale_ids:
+                deleted = chroma_store.delete_by_ids(stale_ids)
+                LOGGER.info(
+                    "Deleted %s stale vectors for doc_id=%s",
+                    deleted,
+                    doc_id,
+                )
 
     return processed
 

@@ -288,6 +288,10 @@ def index(
         None,
         help="Fixed batch size (overrides token-based batching).",
     ),
+    force_delete: bool = typer.Option(
+        False,
+        help="Allow deleting existing vectors even when --limit is set.",
+    ),
 ) -> None:
     """Generate embeddings and index into Chroma."""
 
@@ -312,6 +316,7 @@ def index(
             doc_ids=doc_id,
             limit=limit,
             batch_size=batch_size,
+            force_delete=force_delete,
         )
     except FileNotFoundError as exc:
         typer.echo(str(exc), err=True)

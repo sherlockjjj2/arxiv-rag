@@ -577,7 +577,9 @@ def _backfill_metadata(
         print("All PDFs already have metadata.")
         return 0
 
-    results = _fetch_results(pending_ids, client=resolved_client, config=resolved_config)
+    results = _fetch_results(
+        pending_ids, client=resolved_client, config=resolved_config
+    )
     metadata_rows: list[PaperMetadata] = []
     missing_ids: list[str] = []
 
@@ -809,7 +811,9 @@ def _download_by_id(
     if not (pending_ids := _collect_pending_ids(unique_ids, existing_ids)):
         return 0
 
-    results = _fetch_results(pending_ids, client=resolved_client, config=resolved_config)
+    results = _fetch_results(
+        pending_ids, client=resolved_client, config=resolved_config
+    )
     failures: list[str] = []
     metadata_rows: list[PaperMetadata] = []
 
@@ -907,7 +911,10 @@ def main() -> int:
     args = _parse_args(config)
     db_path = None if args.no_db else args.db
     if not (args.query or args.ids or args.backfill_db):
-        print("Error: one of --query, --ids, or --backfill-db is required.", file=sys.stderr)
+        print(
+            "Error: one of --query, --ids, or --backfill-db is required.",
+            file=sys.stderr,
+        )
         return 2
     if db_path and (args.ids or args.backfill_db):
         _ensure_db(db_path)
@@ -916,7 +923,9 @@ def main() -> int:
     if args.query:
         return _search(args.query, args.max_results, args.sort, config=config)
     return (
-        _download_by_id(args.ids, args.retries, args.timeout, db_path=db_path, config=config)
+        _download_by_id(
+            args.ids, args.retries, args.timeout, db_path=db_path, config=config
+        )
         if args.ids
         else 2
     )

@@ -7,7 +7,12 @@ from dataclasses import dataclass
 from typing import Sequence
 
 from openai import APIError, APITimeoutError, OpenAI, RateLimitError
-from tenacity import Retrying, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
+from tenacity import (
+    Retrying,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential_jitter,
+)
 
 LOGGER = logging.getLogger(__name__)
 
