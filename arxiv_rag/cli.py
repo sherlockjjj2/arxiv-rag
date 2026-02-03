@@ -13,9 +13,12 @@ import typer
 from dotenv import load_dotenv
 from tiktoken import Encoding, get_encoding
 
+from arxiv_rag.chroma_client import ChromaConfig
+from arxiv_rag.chroma_inspect import inspect_chroma_counts
 from arxiv_rag.db import normalize_embedding, serialize_embedding
 from arxiv_rag.embeddings_client import EmbeddingsClient, EmbeddingsConfig
-from arxiv_rag.retrieve import format_snippet, search_fts, search_vector
+from arxiv_rag.indexer import index_chunks
+from arxiv_rag.retrieve import format_snippet, search_fts, search_vector_chroma
 
 app = typer.Typer(help="CLI for arXiv RAG utilities.")
 
@@ -47,6 +50,21 @@ def query(
         exists=False,
         dir_okay=False,
     ),
+    chroma_dir: Path = typer.Option(
+        Path("data/chroma"),
+        envvar="CHROMA_DIR",
+        help="Chroma persistence directory.",
+    ),
+    collection: str = typer.Option(
+        "arxiv_chunks_te3s_v1",
+        envvar="CHROMA_COLLECTION",
+        help="Chroma collection name.",
+    ),
+    distance: Literal["cosine", "l2", "ip"] = typer.Option(
+        "cosine",
+        envvar="CHROMA_DISTANCE",
+        help="Chroma distance metric.",
+    ),
     snippet_chars: int = typer.Option(
         240,
         help="Maximum characters to display per snippet.",
@@ -67,16 +85,25 @@ def query(
             results = search_fts(question, top_k=top_k, db_path=db)
         else:
             embeddings_client = EmbeddingsClient(EmbeddingsConfig(model=model))
-            results = search_vector(
+            chroma_config = ChromaConfig(
+                persist_dir=chroma_dir,
+                collection_name=collection,
+                distance=distance,
+            )
+            results = search_vector_chroma(
                 question,
                 top_k=top_k,
                 db_path=db,
                 embeddings_client=embeddings_client,
+                chroma_config=chroma_config,
             )
     except FileNotFoundError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
     except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    except ImportError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
     except sqlite3.Error as exc:
@@ -212,6 +239,171 @@ def embed(
     except ValueError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
+
+
+@app.command()
+def index(
+    db: Path = typer.Option(
+        Path("data/arxiv_rag.db"),
+        help="SQLite database path.",
+        exists=False,
+        dir_okay=False,
+    ),
+    model: str = typer.Option(
+        "text-embedding-3-small",
+        help="Embedding model name.",
+    ),
+    chroma_dir: Path = typer.Option(
+        Path("data/chroma"),
+        envvar="CHROMA_DIR",
+        help="Chroma persistence directory.",
+    ),
+    collection: str = typer.Option(
+        "arxiv_chunks_te3s_v1",
+        envvar="CHROMA_COLLECTION",
+        help="Chroma collection name.",
+    ),
+    distance: Literal["cosine", "l2", "ip"] = typer.Option(
+        "cosine",
+        envvar="CHROMA_DISTANCE",
+        help="Chroma distance metric.",
+    ),
+    doc_id: list[str] | None = typer.Option(
+        None,
+        help="Limit indexing to specific doc_id values (repeatable).",
+    ),
+    limit: int | None = typer.Option(
+        None,
+        help="Limit number of chunks to index.",
+    ),
+    max_request_tokens: int = typer.Option(
+        32000,
+        help="Maximum total tokens per embeddings request.",
+    ),
+    max_input_tokens: int = typer.Option(
+        8192,
+        help="Maximum tokens allowed for a single input.",
+    ),
+    batch_size: int | None = typer.Option(
+        None,
+        help="Fixed batch size (overrides token-based batching).",
+    ),
+) -> None:
+    """Generate embeddings and index into Chroma."""
+
+    logging.basicConfig(level=logging.INFO)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    chroma_config = ChromaConfig(
+        persist_dir=chroma_dir,
+        collection_name=collection,
+        distance=distance,
+    )
+    embeddings_config = EmbeddingsConfig(
+        model=model,
+        max_request_tokens=max_request_tokens,
+        max_input_tokens=max_input_tokens,
+    )
+
+    try:
+        total = index_chunks(
+            db_path=db,
+            chroma_config=chroma_config,
+            embeddings_config=embeddings_config,
+            doc_ids=doc_id,
+            limit=limit,
+            batch_size=batch_size,
+        )
+    except FileNotFoundError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    except ImportError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    except sqlite3.Error as exc:
+        typer.echo(f"SQLite error: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+    if total == 0:
+        typer.echo("No chunks to index.")
+        raise typer.Exit(code=0)
+
+    typer.echo(f"Indexed {total} chunks into Chroma.")
+
+
+@app.command()
+def inspect(
+    db: Path = typer.Option(
+        Path("data/arxiv_rag.db"),
+        help="SQLite database path.",
+        exists=False,
+        dir_okay=False,
+    ),
+    chroma_dir: Path = typer.Option(
+        Path("data/chroma"),
+        envvar="CHROMA_DIR",
+        help="Chroma persistence directory.",
+    ),
+    collection: str = typer.Option(
+        "arxiv_chunks_te3s_v1",
+        envvar="CHROMA_COLLECTION",
+        help="Chroma collection name.",
+    ),
+    distance: Literal["cosine", "l2", "ip"] = typer.Option(
+        "cosine",
+        envvar="CHROMA_DISTANCE",
+        help="Chroma distance metric.",
+    ),
+    doc_id: list[str] | None = typer.Option(
+        None,
+        help="Limit to specific doc_id values (repeatable).",
+    ),
+    limit: int | None = typer.Option(
+        None,
+        help="Limit number of doc_ids to inspect.",
+    ),
+) -> None:
+    """Inspect Chroma counts per doc_id."""
+
+    logging.basicConfig(level=logging.INFO)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    chroma_config = ChromaConfig(
+        persist_dir=chroma_dir,
+        collection_name=collection,
+        distance=distance,
+    )
+
+    try:
+        counts = inspect_chroma_counts(
+            db_path=db,
+            chroma_config=chroma_config,
+            doc_ids=doc_id,
+            limit=limit,
+        )
+    except FileNotFoundError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    except ImportError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    except sqlite3.Error as exc:
+        typer.echo(f"SQLite error: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+    if not counts:
+        typer.echo("No doc_ids found.")
+        raise typer.Exit(code=0)
+
+    total = 0
+    for entry in counts:
+        typer.echo(f"{entry.doc_id}\t{entry.count}")
+        total += entry.count
+    typer.echo(f"TOTAL\t{total}")
 
 
 def _load_chunks_to_embed(
