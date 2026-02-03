@@ -132,6 +132,24 @@ def test_build_fts_query_relaxed() -> None:
     assert query == "(typical AND patterns) AND (Agent)"
 
 
+def test_build_fts_query_preserves_unicode_terms() -> None:
+    retrieve = _load_retrieve_module()
+    query = retrieve.build_fts_query("rényi entropy")
+    assert query == "(entropy) AND (rényi)"
+
+
+def test_build_fts_query_handles_greek_letters() -> None:
+    retrieve = _load_retrieve_module()
+    query = retrieve.build_fts_query("α-β divergence")
+    assert query == "(divergence) AND (α OR β)"
+
+
+def test_build_fts_query_non_ascii_only() -> None:
+    retrieve = _load_retrieve_module()
+    query = retrieve.build_fts_query("模型")
+    assert query == "模型"
+
+
 def test_query_cli_outputs_snippet(tmp_path: Path) -> None:
     db_path = tmp_path / "arxiv_rag.db"
     _create_fts_db(db_path)

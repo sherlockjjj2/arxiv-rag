@@ -56,19 +56,19 @@ uv run python arxiv_rag/chunk.py --parsed data/parsed/2301.12345v1.json --db dat
 5. Index embeddings into Chroma:
 
 ```bash
-uv run arxiv-rag index --db data/arxiv_rag.db
+uv run python -m arxiv_rag.cli index --db data/arxiv_rag.db
 ```
 
 6. Query the BM25 index:
 
 ```bash
-uv run arxiv-rag query "dense retrieval" --top-k 5
+uv run python -m arxiv_rag.cli query "dense retrieval" --top-k 5
 ```
 
 7. Query vector embeddings (Chroma):
 
 ```bash
-uv run arxiv-rag query "dense retrieval" --top-k 5 --mode vector
+uv run python -m arxiv_rag.cli query "dense retrieval" --top-k 5 --mode vector
 ```
 
 ## CLI usage
@@ -131,7 +131,7 @@ are deleted and replaced with the latest version.
 ### Query the BM25 index
 
 ```bash
-uv run arxiv-rag query "dense retrieval" --top-k 5
+uv run python -m arxiv_rag.cli query "dense retrieval" --top-k 5
 ```
 
 Notes:
@@ -152,13 +152,13 @@ uv run python main.py query "dense retrieval" --db data/arxiv_rag.db --top-k 5
 Include BM25 scores:
 
 ```bash
-uv run arxiv-rag query "dense retrieval" --show-score
+uv run python -m arxiv_rag.cli query "dense retrieval" --show-score
 ```
 
 ### Embed chunks with OpenAI
 
 ```bash
-uv run arxiv-rag embed --db data/arxiv_rag.db
+uv run python -m arxiv_rag.cli embed --db data/arxiv_rag.db
 ```
 
 Note: this stores embeddings in SQLite for the legacy in-memory vector search path.
@@ -166,7 +166,7 @@ Note: this stores embeddings in SQLite for the legacy in-memory vector search pa
 ### Index embeddings into Chroma
 
 ```bash
-uv run arxiv-rag index --db data/arxiv_rag.db
+uv run python -m arxiv_rag.cli index --db data/arxiv_rag.db
 ```
 
 Notes:
@@ -178,19 +178,19 @@ Notes:
 ### Query vector embeddings (Chroma)
 
 ```bash
-uv run arxiv-rag query "dense retrieval" --mode vector --top-k 5
+uv run python -m arxiv_rag.cli query "dense retrieval" --mode vector --top-k 5
 ```
 
 ### Hybrid retrieval (RRF)
 
 ```bash
-uv run arxiv-rag query "dense retrieval" --mode hybrid --top-k 5
+uv run python -m arxiv_rag.cli query "dense retrieval" --mode hybrid --top-k 5
 ```
 
 Verbose provenance (rank, raw score/distance, normalized rank score, RRF contribution):
 
 ```bash
-uv run arxiv-rag query "dense retrieval" --mode hybrid --top-k 5 --verbose
+uv run python -m arxiv_rag.cli query "dense retrieval" --mode hybrid --top-k 5 --verbose
 ```
 
 Notes:
@@ -198,10 +198,20 @@ Notes:
 - Hybrid retrieval fuses FTS + vector results using RRF.
 - If Chroma is unavailable or empty, it falls back to SQLite embeddings.
 
+### Sources (hybrid + verbose alias)
+
+```bash
+uv run python -m arxiv_rag.cli sources "dense retrieval" --top-k 5
+```
+
+Notes:
+
+- `sources` is an alias for `query --mode hybrid --verbose`.
+
 ### Inspect Chroma counts
 
 ```bash
-uv run arxiv-rag inspect --db data/arxiv_rag.db
+uv run python -m arxiv_rag.cli inspect --db data/arxiv_rag.db
 ```
 
 ## Data locations
