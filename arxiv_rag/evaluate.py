@@ -6,6 +6,7 @@ import json
 import logging
 import random
 import sqlite3
+from hashlib import sha256
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -26,8 +27,16 @@ from arxiv_rag.db import (
     load_paper_ids,
     normalize_embedding,
 )
-from arxiv_rag.embeddings_client import EmbeddingsClient, EmbeddingsConfig
-from arxiv_rag.generate import Chunk as GenerationChunk, generate_answer
+from arxiv_rag.embeddings_client import (
+    EmbeddingBatchResult,
+    EmbeddingsClient,
+    EmbeddingsConfig,
+)
+from arxiv_rag.generate import (
+    Chunk as GenerationChunk,
+    generate_answer,
+    load_prompt_template,
+)
 from arxiv_rag.retrieve import (
     ChunkResult,
     HybridChunkResult,
@@ -396,6 +405,282 @@ class EvalReport:
             "failures": self.failures.as_dict(),
             "items": [item.as_dict() for item in self.items],
         }
+
+
+class EvalCache:
+    """Persistent SQLite cache for eval embeddings and generated answers.
+
+    Args:
+        db_path: Path to the cache SQLite database.
+    """
+
+    def __init__(self, db_path: Path) -> None:
+        """Initialize and ensure cache schema exists.
+
+        Args:
+            db_path: Cache database path.
+        Raises:
+            sqlite3.Error: If the cache DB cannot be opened or initialized.
+        """
+
+        self._db_path = db_path
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(self._db_path)
+        self._ensure_schema()
+
+    def close(self) -> None:
+        """Close the underlying SQLite connection."""
+
+        self._conn.close()
+
+    def __enter__(self) -> EvalCache:
+        """Enter context manager scope."""
+
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        """Close cache connection at context exit."""
+
+        self.close()
+
+    def _ensure_schema(self) -> None:
+        """Create cache tables when missing."""
+
+        self._conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS query_embedding_cache (
+                query_text TEXT NOT NULL,
+                embedding_model TEXT NOT NULL,
+                embedding_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (query_text, embedding_model)
+            );
+            CREATE TABLE IF NOT EXISTS generated_answer_cache (
+                query_text TEXT NOT NULL,
+                generation_model TEXT NOT NULL,
+                prompt_version TEXT NOT NULL,
+                chunk_uids_hash TEXT NOT NULL,
+                answer_text TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (
+                    query_text,
+                    generation_model,
+                    prompt_version,
+                    chunk_uids_hash
+                )
+            );
+            """
+        )
+        self._conn.commit()
+
+    def get_query_embedding(
+        self,
+        *,
+        query: str,
+        embedding_model: str,
+    ) -> list[float] | None:
+        """Load a cached query embedding.
+
+        Args:
+            query: Query text.
+            embedding_model: Embedding model name.
+        Returns:
+            Cached embedding vector if present and valid, else None.
+        """
+
+        row = self._conn.execute(
+            """
+            SELECT embedding_json
+            FROM query_embedding_cache
+            WHERE query_text = ? AND embedding_model = ?
+            """,
+            (query, embedding_model),
+        ).fetchone()
+        if row is None:
+            return None
+        try:
+            payload = json.loads(row[0])
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(payload, list) or not payload:
+            return None
+        return [float(value) for value in payload]
+
+    def set_query_embedding(
+        self,
+        *,
+        query: str,
+        embedding_model: str,
+        embedding: Sequence[float],
+    ) -> None:
+        """Store or update a cached query embedding.
+
+        Args:
+            query: Query text.
+            embedding_model: Embedding model name.
+            embedding: Embedding vector.
+        """
+
+        self._conn.execute(
+            """
+            INSERT INTO query_embedding_cache (
+                query_text,
+                embedding_model,
+                embedding_json
+            ) VALUES (?, ?, ?)
+            ON CONFLICT(query_text, embedding_model)
+            DO UPDATE SET
+                embedding_json = excluded.embedding_json,
+                created_at = CURRENT_TIMESTAMP
+            """,
+            (query, embedding_model, json.dumps(list(embedding))),
+        )
+        self._conn.commit()
+
+    def get_generated_answer(
+        self,
+        *,
+        query: str,
+        generation_model: str,
+        prompt_version: str,
+        chunk_uids_hash: str,
+    ) -> str | None:
+        """Load a cached generated answer.
+
+        Args:
+            query: Query text.
+            generation_model: Generation model name.
+            prompt_version: Prompt content version identifier.
+            chunk_uids_hash: Hash of generation chunk UIDs.
+        Returns:
+            Cached answer text if present, else None.
+        """
+
+        row = self._conn.execute(
+            """
+            SELECT answer_text
+            FROM generated_answer_cache
+            WHERE query_text = ?
+              AND generation_model = ?
+              AND prompt_version = ?
+              AND chunk_uids_hash = ?
+            """,
+            (query, generation_model, prompt_version, chunk_uids_hash),
+        ).fetchone()
+        if row is None:
+            return None
+        return str(row[0])
+
+    def set_generated_answer(
+        self,
+        *,
+        query: str,
+        generation_model: str,
+        prompt_version: str,
+        chunk_uids_hash: str,
+        answer: str,
+    ) -> None:
+        """Store or update a cached generated answer."""
+
+        self._conn.execute(
+            """
+            INSERT INTO generated_answer_cache (
+                query_text,
+                generation_model,
+                prompt_version,
+                chunk_uids_hash,
+                answer_text
+            ) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(
+                query_text,
+                generation_model,
+                prompt_version,
+                chunk_uids_hash
+            )
+            DO UPDATE SET
+                answer_text = excluded.answer_text,
+                created_at = CURRENT_TIMESTAMP
+            """,
+            (query, generation_model, prompt_version, chunk_uids_hash, answer),
+        )
+        self._conn.commit()
+
+
+class CachedEmbeddingsClient:
+    """Embeddings client wrapper backed by EvalCache."""
+
+    def __init__(
+        self,
+        *,
+        base_client: EmbeddingsClient,
+        cache: EvalCache | None,
+    ) -> None:
+        """Initialize caching wrapper.
+
+        Args:
+            base_client: Non-caching embeddings client.
+            cache: Optional cache backend. No-op when None.
+        """
+
+        self._base_client = base_client
+        self._cache = cache
+
+    @property
+    def config(self) -> EmbeddingsConfig:
+        """Return active embeddings config."""
+
+        return self._base_client.config
+
+    def embed(self, inputs: Sequence[str]) -> EmbeddingBatchResult:
+        """Embed text inputs with cache lookup for repeated requests.
+
+        Args:
+            inputs: Input texts to embed.
+        Returns:
+            Embeddings in the same order as inputs.
+        Raises:
+            ValueError: If inputs is empty.
+        """
+
+        if self._cache is None:
+            return self._base_client.embed(inputs)
+
+        if not inputs:
+            raise ValueError("inputs must be non-empty")
+
+        model = self._base_client.config.model
+        embeddings_by_input: dict[str, list[float]] = {}
+        missing_inputs: list[str] = []
+        for text in dict.fromkeys(inputs):
+            cached_embedding = self._cache.get_query_embedding(
+                query=text,
+                embedding_model=model,
+            )
+            if cached_embedding is None:
+                missing_inputs.append(text)
+            else:
+                embeddings_by_input[text] = cached_embedding
+
+        total_tokens: int | None = None
+        if missing_inputs:
+            batch_result = self._base_client.embed(missing_inputs)
+            total_tokens = batch_result.total_tokens
+            for text, embedding in zip(
+                missing_inputs,
+                batch_result.embeddings,
+                strict=False,
+            ):
+                embeddings_by_input[text] = embedding
+                self._cache.set_query_embedding(
+                    query=text,
+                    embedding_model=model,
+                    embedding=embedding,
+                )
+
+        return EmbeddingBatchResult(
+            embeddings=[embeddings_by_input[text] for text in inputs],
+            total_tokens=total_tokens,
+        )
 
 
 class EvalGenerationClient:
@@ -994,6 +1279,7 @@ def run_eval(
     generate: bool,
     generate_model: str,
     generation_top_k: int,
+    cache_db_path: Path | None = None,
 ) -> EvalReport:
     """Run evaluation for an eval set.
 
@@ -1004,6 +1290,7 @@ def run_eval(
         generate: Whether to run generation and compute citation accuracy.
         generate_model: Model name for answer generation.
         generation_top_k: Number of chunks to pass to the generator.
+        cache_db_path: Optional SQLite cache path for embeddings/answers.
     Returns:
         EvalReport with per-item results and summary metrics.
     Raises:
@@ -1016,6 +1303,25 @@ def run_eval(
     if generation_top_k <= 0:
         raise ValueError("generation_top_k must be > 0")
 
+    cache = EvalCache(cache_db_path) if cache_db_path is not None else None
+    prompt_version = (
+        _compute_prompt_version() if generate and cache is not None else None
+    )
+    embeddings_client: CachedEmbeddingsClient | None = None
+    chroma_config: ChromaConfig | None = None
+    if retrieval_config.mode in {"vector", "hybrid"}:
+        embeddings_client = CachedEmbeddingsClient(
+            base_client=EmbeddingsClient(
+                EmbeddingsConfig(model=retrieval_config.model)
+            ),
+            cache=cache,
+        )
+        chroma_config = ChromaConfig(
+            persist_dir=retrieval_config.chroma_dir,
+            collection_name=retrieval_config.collection,
+            distance=retrieval_config.distance,
+        )
+
     results: list[EvalItemResult] = []
     recall_5_scores: list[float] = []
     recall_10_scores: list[float] = []
@@ -1023,82 +1329,112 @@ def run_eval(
     citation_scores: list[float] = []
     citation_scores_recall5_hit: list[float] = []
 
-    for item in eval_set.eval_set:
-        retrieval_results, warnings = _run_retrieval(
-            query=item.query,
-            db_path=db_path,
-            retrieval_config=retrieval_config,
-        )
-        retrieved_uids = [result.chunk_uid for result in retrieval_results]
-
-        recall_5 = compute_recall_at_k(
-            retrieved_uids,
-            item.ground_truth.chunk_uids,
-            k=5,
-        )
-        recall_10 = compute_recall_at_k(
-            retrieved_uids,
-            item.ground_truth.chunk_uids,
-            k=10,
-        )
-        mrr = compute_mrr(retrieved_uids, item.ground_truth.chunk_uids)
-        first_rank = find_first_correct_rank(
-            retrieved_uids,
-            item.ground_truth.chunk_uids,
-        )
-
-        recall_5_scores.append(recall_5)
-        recall_10_scores.append(recall_10)
-        mrr_scores.append(mrr)
-
-        citation_count = None
-        citation_accuracy = None
-        citation_error = None
-        generation_error = None
-
-        if generate:
-            try:
-                answer = generate_answer(
-                    item.query,
-                    _build_generation_chunks(retrieval_results, generation_top_k),
-                    model=generate_model,
-                )
-            except ValueError as exc:
-                generation_error = str(exc)
-            except RuntimeError as exc:
-                generation_error = str(exc)
-            else:
-                try:
-                    citations = parse_citations(answer)
-                    citation_count = len(citations)
-                    citation_accuracy = _score_citations_for_item(
-                        citations,
-                        ground_truth_chunk_uids=item.ground_truth.chunk_uids,
-                        db_path=db_path,
-                    )
-                    citation_scores.append(citation_accuracy)
-                    if recall_5 > 0.0:
-                        citation_scores_recall5_hit.append(citation_accuracy)
-                except ValueError as exc:
-                    citation_error = str(exc)
-
-        results.append(
-            EvalItemResult(
-                query_id=item.query_id,
+    try:
+        for item in eval_set.eval_set:
+            retrieval_results, warnings = _run_retrieval(
                 query=item.query,
-                recall_at_5=recall_5,
-                recall_at_10=recall_10,
-                mrr=mrr,
-                first_correct_rank=first_rank,
-                retrieved_chunk_uids=retrieved_uids,
-                ground_truth_chunk_uids=list(item.ground_truth.chunk_uids),
-                citation_count=citation_count,
-                citation_accuracy=citation_accuracy,
-                citation_error=citation_error,
-                generation_error=generation_error,
-                warnings=warnings,
+                db_path=db_path,
+                retrieval_config=retrieval_config,
+                embeddings_client=embeddings_client,
+                chroma_config=chroma_config,
             )
-        )
+            retrieved_uids = [result.chunk_uid for result in retrieval_results]
+
+            recall_5 = compute_recall_at_k(
+                retrieved_uids,
+                item.ground_truth.chunk_uids,
+                k=5,
+            )
+            recall_10 = compute_recall_at_k(
+                retrieved_uids,
+                item.ground_truth.chunk_uids,
+                k=10,
+            )
+            mrr = compute_mrr(retrieved_uids, item.ground_truth.chunk_uids)
+            first_rank = find_first_correct_rank(
+                retrieved_uids,
+                item.ground_truth.chunk_uids,
+            )
+
+            recall_5_scores.append(recall_5)
+            recall_10_scores.append(recall_10)
+            mrr_scores.append(mrr)
+
+            citation_count = None
+            citation_accuracy = None
+            citation_error = None
+            generation_error = None
+
+            if generate:
+                generation_chunks = _build_generation_chunks(
+                    retrieval_results,
+                    generation_top_k,
+                )
+                chunk_uids_hash = _hash_chunk_uids(generation_chunks)
+                answer = None
+                if cache is not None and prompt_version is not None:
+                    answer = cache.get_generated_answer(
+                        query=item.query,
+                        generation_model=generate_model,
+                        prompt_version=prompt_version,
+                        chunk_uids_hash=chunk_uids_hash,
+                    )
+                if answer is None:
+                    try:
+                        answer = generate_answer(
+                            item.query,
+                            generation_chunks,
+                            model=generate_model,
+                        )
+                    except ValueError as exc:
+                        generation_error = str(exc)
+                    except RuntimeError as exc:
+                        generation_error = str(exc)
+                    else:
+                        if cache is not None and prompt_version is not None:
+                            cache.set_generated_answer(
+                                query=item.query,
+                                generation_model=generate_model,
+                                prompt_version=prompt_version,
+                                chunk_uids_hash=chunk_uids_hash,
+                                answer=answer,
+                            )
+
+                if answer is not None:
+                    try:
+                        citations = parse_citations(answer)
+                        citation_count = len(citations)
+                        citation_accuracy = _score_citations_for_item(
+                            citations,
+                            ground_truth_chunk_uids=item.ground_truth.chunk_uids,
+                            db_path=db_path,
+                        )
+                        citation_scores.append(citation_accuracy)
+                        if recall_5 > 0.0:
+                            citation_scores_recall5_hit.append(citation_accuracy)
+                    except ValueError as exc:
+                        citation_error = str(exc)
+
+            results.append(
+                EvalItemResult(
+                    query_id=item.query_id,
+                    query=item.query,
+                    recall_at_5=recall_5,
+                    recall_at_10=recall_10,
+                    mrr=mrr,
+                    first_correct_rank=first_rank,
+                    retrieved_chunk_uids=retrieved_uids,
+                    ground_truth_chunk_uids=list(item.ground_truth.chunk_uids),
+                    citation_count=citation_count,
+                    citation_accuracy=citation_accuracy,
+                    citation_error=citation_error,
+                    generation_error=generation_error,
+                    warnings=warnings,
+                )
+            )
+    finally:
+        if cache is not None:
+            cache.close()
 
     summary = EvalSummary(
         recall_at_5=_mean(recall_5_scores),
@@ -1125,6 +1461,8 @@ def _run_retrieval(
     query: str,
     db_path: Path,
     retrieval_config: RetrievalConfig,
+    embeddings_client: CachedEmbeddingsClient | None = None,
+    chroma_config: ChromaConfig | None = None,
 ) -> tuple[list[ChunkResult | HybridChunkResult], list[str]]:
     """Run retrieval for evaluation."""
 
@@ -1132,10 +1470,13 @@ def _run_retrieval(
     if retrieval_config.mode == "fts":
         results = search_fts(query, top_k=retrieval_config.top_k, db_path=db_path)
     elif retrieval_config.mode == "vector":
-        embeddings_client = EmbeddingsClient(
-            EmbeddingsConfig(model=retrieval_config.model)
+        active_embeddings_client = embeddings_client or CachedEmbeddingsClient(
+            base_client=EmbeddingsClient(
+                EmbeddingsConfig(model=retrieval_config.model)
+            ),
+            cache=None,
         )
-        chroma_config = ChromaConfig(
+        active_chroma_config = chroma_config or ChromaConfig(
             persist_dir=retrieval_config.chroma_dir,
             collection_name=retrieval_config.collection,
             distance=retrieval_config.distance,
@@ -1145,16 +1486,19 @@ def _run_retrieval(
                 query,
                 top_k=retrieval_config.top_k,
                 db_path=db_path,
-                embeddings_client=embeddings_client,
-                chroma_config=chroma_config,
+                embeddings_client=active_embeddings_client,
+                chroma_config=active_chroma_config,
             )
         except ImportError as exc:
             raise ValueError(str(exc)) from exc
     else:
-        embeddings_client = EmbeddingsClient(
-            EmbeddingsConfig(model=retrieval_config.model)
+        active_embeddings_client = embeddings_client or CachedEmbeddingsClient(
+            base_client=EmbeddingsClient(
+                EmbeddingsConfig(model=retrieval_config.model)
+            ),
+            cache=None,
         )
-        chroma_config = ChromaConfig(
+        active_chroma_config = chroma_config or ChromaConfig(
             persist_dir=retrieval_config.chroma_dir,
             collection_name=retrieval_config.collection,
             distance=retrieval_config.distance,
@@ -1163,8 +1507,8 @@ def _run_retrieval(
             query,
             top_k=retrieval_config.top_k,
             db_path=db_path,
-            embeddings_client=embeddings_client,
-            chroma_config=chroma_config,
+            embeddings_client=active_embeddings_client,
+            chroma_config=active_chroma_config,
             rrf_k=retrieval_config.rrf_k,
             fts_weight=retrieval_config.rrf_weight_fts,
             vector_weight=retrieval_config.rrf_weight_vector,
@@ -1173,6 +1517,20 @@ def _run_retrieval(
         results = output.results
 
     return results, warnings
+
+
+def _compute_prompt_version() -> str:
+    """Compute a stable prompt version hash for generation cache keys."""
+
+    prompt_template = load_prompt_template()
+    return sha256(prompt_template.encode("utf-8")).hexdigest()
+
+
+def _hash_chunk_uids(chunks: Sequence[GenerationChunk]) -> str:
+    """Compute a stable hash for ordered generation chunk UIDs."""
+
+    payload = "\n".join(chunk.chunk_uid for chunk in chunks)
+    return sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _build_generation_chunks(

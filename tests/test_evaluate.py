@@ -1,6 +1,15 @@
+from pathlib import Path
+
+import arxiv_rag.evaluate as evaluate_module
 from arxiv_rag.evaluate import (
+    CachedEmbeddingsClient,
+    EvalCache,
     EvalFailureSummary,
     EvalItemResult,
+    EvalMetadata,
+    EvalSet,
+    EvalGroundTruth,
+    EvalItem,
     EvalReport,
     EvalSummary,
     _summarize_failures,
@@ -8,7 +17,9 @@ from arxiv_rag.evaluate import (
     compute_mrr,
     compute_recall_at_k,
     render_report_markdown,
+    run_eval,
 )
+from arxiv_rag.retrieve import ChunkResult
 from arxiv_rag.verify import CitationRecord
 
 
@@ -123,3 +134,143 @@ def test_render_report_markdown_includes_new_citation_fields() -> None:
     assert "Citation accuracy (Recall@5 > 0): 0.890" in rendered
     assert "Citation absent: 4" in rendered
     assert "Citation zero score: 12" in rendered
+
+
+def test_eval_cache_round_trip(tmp_path: Path) -> None:
+    cache = EvalCache(tmp_path / "eval_cache.db")
+    cache.set_query_embedding(
+        query="what is rrf",
+        embedding_model="text-embedding-3-small",
+        embedding=[0.1, 0.2, 0.3],
+    )
+    cache.set_generated_answer(
+        query="what is rrf",
+        generation_model="gpt-4o-mini",
+        prompt_version="prompt-v1",
+        chunk_uids_hash="hash-1",
+        answer="RRF answer",
+    )
+
+    assert cache.get_query_embedding(
+        query="what is rrf",
+        embedding_model="text-embedding-3-small",
+    ) == [0.1, 0.2, 0.3]
+    assert (
+        cache.get_generated_answer(
+            query="what is rrf",
+            generation_model="gpt-4o-mini",
+            prompt_version="prompt-v1",
+            chunk_uids_hash="hash-1",
+        )
+        == "RRF answer"
+    )
+
+
+def test_cached_embeddings_client_reuses_cache(tmp_path: Path) -> None:
+    class _FakeBaseClient:
+        def __init__(self) -> None:
+            from arxiv_rag.embeddings_client import EmbeddingsConfig
+
+            self.config = EmbeddingsConfig(model="text-embedding-3-small")
+            self.calls = 0
+
+        def embed(self, inputs):
+            from arxiv_rag.embeddings_client import EmbeddingBatchResult
+
+            self.calls += 1
+            return EmbeddingBatchResult(
+                embeddings=[[float(len(text)), 1.0] for text in inputs],
+                total_tokens=5,
+            )
+
+    base_client = _FakeBaseClient()
+    cache = EvalCache(tmp_path / "emb_cache.db")
+    client = CachedEmbeddingsClient(
+        base_client=base_client,  # type: ignore[arg-type]
+        cache=cache,
+    )
+
+    first = client.embed(["q1", "q2", "q1"])
+    second = client.embed(["q1"])
+
+    assert base_client.calls == 1
+    assert first.embeddings[0] == first.embeddings[2]
+    assert second.embeddings[0] == first.embeddings[0]
+
+
+def test_run_eval_uses_generated_answer_cache(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    db_path = tmp_path / "eval.db"
+    db_path.touch()
+    cache_db_path = tmp_path / "cache.db"
+    generation_calls = {"count": 0}
+
+    eval_set = EvalSet(
+        eval_set=[
+            EvalItem(
+                query_id="q1",
+                query="Explain dense retrieval",
+                difficulty="factual",
+                ground_truth=EvalGroundTruth(
+                    chunk_uids=["uid-1"],
+                    papers=["1234.5678"],
+                    pages=[[1]],
+                ),
+                reference_answer="Ref",
+            )
+        ],
+        metadata=EvalMetadata(
+            created="2026-02-04",
+            corpus_version="v1",
+            n_queries=1,
+        ),
+    )
+
+    def _fake_run_retrieval(*, query, db_path, retrieval_config, **kwargs):
+        del query, db_path, retrieval_config, kwargs
+        return (
+            [
+                ChunkResult(
+                    chunk_uid="uid-1",
+                    chunk_id=1,
+                    paper_id="1234.5678",
+                    page_number=1,
+                    text="chunk text",
+                    score=1.0,
+                )
+            ],
+            [],
+        )
+
+    def _fake_generate_answer(query, chunks, model="gpt-4o-mini"):
+        del query, chunks, model
+        generation_calls["count"] += 1
+        return "cached answer"
+
+    monkeypatch.setattr(evaluate_module, "_run_retrieval", _fake_run_retrieval)
+    monkeypatch.setattr(evaluate_module, "generate_answer", _fake_generate_answer)
+    monkeypatch.setattr(evaluate_module, "parse_citations", lambda answer: [])
+    monkeypatch.setattr(evaluate_module, "load_prompt_template", lambda path=None: "P")
+
+    run_eval(
+        eval_set=eval_set,
+        db_path=db_path,
+        retrieval_config=evaluate_module.RetrievalConfig(mode="fts", top_k=5),
+        generate=True,
+        generate_model="gpt-4o-mini",
+        generation_top_k=1,
+        cache_db_path=cache_db_path,
+    )
+    run_eval(
+        eval_set=eval_set,
+        db_path=db_path,
+        retrieval_config=evaluate_module.RetrievalConfig(mode="fts", top_k=5),
+        generate=True,
+        generate_model="gpt-4o-mini",
+        generation_top_k=1,
+        cache_db_path=cache_db_path,
+    )
+
+    assert generation_calls["count"] == 1
