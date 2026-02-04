@@ -117,6 +117,15 @@ def test_load_parsed_document_requires_doc_id(tmp_path: Path):
         chunk.load_parsed_document(parsed_path)
 
 
+def test_load_parsed_document_rejects_non_json_input(tmp_path: Path):
+    chunk = _load_chunk_module()
+    parsed_path = tmp_path / "2505.09388v1.pdf"
+    parsed_path.write_bytes(b"%PDF-\x8f\x00")
+
+    with pytest.raises(ValueError, match="--parsed expects JSON files"):
+        chunk.load_parsed_document(parsed_path)
+
+
 def test_ingest_replaces_chunks_on_new_doc_id(tmp_path: Path):
     chunk = _load_chunk_module()
     db_path = tmp_path / "test.db"

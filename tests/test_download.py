@@ -1,5 +1,6 @@
 import importlib.util
 import sys
+from argparse import Namespace
 from pathlib import Path
 import sqlite3
 from datetime import datetime
@@ -342,3 +343,46 @@ def test_backfill_no_pdfs(tmp_path, monkeypatch):
     monkeypatch.setattr(download, "_fetch_results", fail_fetch_results)
 
     assert download._backfill_metadata(db_path) == 0
+
+
+def test_create_arxiv_client_uses_timeout_session():
+    download = _load_download_module()
+    config = download.default_config()
+    config = download.replace(
+        config,
+        client_timeout_seconds=7.5,
+    )
+
+    client = download.create_arxiv_client(config)
+
+    assert isinstance(client.client._session, download._ArxivTimeoutSession)
+    assert client.client._session.timeout_seconds == 7.5
+
+
+def test_main_handles_arxiv_api_request_error(monkeypatch, capsys):
+    download = _load_download_module()
+    args = Namespace(
+        query="RAG",
+        ids=None,
+        backfill_db=False,
+        no_db=False,
+        db=Path("data/arxiv_rag.db"),
+        max_results=5,
+        sort="relevance",
+        retries=3,
+        timeout=30,
+        api_retries=5,
+        api_timeout=20.0,
+    )
+    monkeypatch.setattr(download, "_parse_args", lambda _config=None: args)
+
+    def fake_search(*_args, **_kwargs):
+        raise download.requests.exceptions.ProxyError("proxy unavailable")
+
+    monkeypatch.setattr(download, "_search", fake_search)
+
+    exit_code = download.main()
+    captured = capsys.readouterr()
+
+    assert exit_code == 2
+    assert "failed to reach the arXiv API" in captured.err
