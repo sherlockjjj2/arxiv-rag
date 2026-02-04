@@ -133,6 +133,12 @@ uv run python arxiv_rag/parse.py --pdf data/arxiv-papers/2505.09388v1.pdf
 uv run python arxiv_rag/parse.py --pdf data/arxiv-papers/2505.09388v1.pdf --remove-headers-footers
 ```
 
+Notes:
+
+- MuPDF parser diagnostics are muted during parsing to keep progress output clean.
+- Process-level stderr is temporarily muted during parse extraction to suppress low-level MuPDF diagnostics that bypass Python logging.
+- `parse.py` suppresses low-risk MuPDF warnings (font-metric / graphics-structure noise) and emits compact summaries only for higher-risk warnings.
+
 ### Chunk parsed JSON into SQLite
 
 ```bash
@@ -145,6 +151,8 @@ uv run python arxiv_rag/chunk.py --parsed data/parsed --db data/arxiv_rag.db
 
 `--parsed` only accepts parsed `.json` files (or directories containing `.json` files).  
 If you only have a PDF, run `parse.py` first.
+- Chunk text preserves Unicode symbols (for example ligatures and math symbols)
+  to avoid replacement characters (`�`) in retrieval output.
 
 When a paper is re-parsed with a new PDF version, existing chunks for that `paper_id`
 are deleted and replaced with the latest version.
@@ -217,6 +225,7 @@ Notes:
 
 - IDs can include versions (`v2`); they are normalized to base IDs.
 - The command writes parsed JSON files to `data/parsed/` by default.
+- arXiv client INFO logs are suppressed by default during `index --add-ids` to keep output concise; warnings/errors are still shown.
 - Failures are isolated per paper and reported at the end.
 
 ### Rebuild Local Corpus (`--rebuild`)

@@ -1417,6 +1417,7 @@ def index(
 
     logging.basicConfig(level=logging.INFO)
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("arxiv").setLevel(logging.WARNING)
     chroma_config = ChromaConfig(
         persist_dir=chroma_dir,
         collection_name=collection,

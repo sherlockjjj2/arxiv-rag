@@ -1,4 +1,5 @@
 import importlib.util
+import os
 import re
 import sys
 from pathlib import Path
@@ -79,3 +80,89 @@ def test_parse_pdf_unreadable(tmp_path):
     bad_pdf.write_bytes(b"not a pdf")
     with pytest.raises(ValueError):
         parse.parse_pdf(str(bad_pdf))
+
+
+def test_parse_pdf_mutes_mupdf_diagnostics(tmp_path, monkeypatch):
+    parse = _load_parse_module()
+    pdf_path = tmp_path / "sample.pdf"
+    _write_pdf(pdf_path, ["Page body"])
+
+    error_calls: list[bool | None] = []
+    warning_calls: list[bool | None] = []
+
+    original_error_toggle = parse.fitz.TOOLS.mupdf_display_errors
+    original_warning_toggle = parse.fitz.TOOLS.mupdf_display_warnings
+    initial_error_state = bool(original_error_toggle())
+    initial_warning_state = bool(original_warning_toggle())
+
+    def _record_error_toggle(on: bool | None = None):
+        error_calls.append(on)
+        return original_error_toggle(on)
+
+    def _record_warning_toggle(on: bool | None = None):
+        warning_calls.append(on)
+        return original_warning_toggle(on)
+
+    monkeypatch.setattr(
+        parse.fitz.TOOLS,
+        "mupdf_display_errors",
+        _record_error_toggle,
+    )
+    monkeypatch.setattr(
+        parse.fitz.TOOLS,
+        "mupdf_display_warnings",
+        _record_warning_toggle,
+    )
+
+    parse.parse_pdf(str(pdf_path))
+
+    explicit_error_calls = [value for value in error_calls if value is not None]
+    explicit_warning_calls = [value for value in warning_calls if value is not None]
+    assert explicit_error_calls[0] is False
+    assert explicit_warning_calls[0] is False
+    assert explicit_error_calls[-1] is initial_error_state
+    assert explicit_warning_calls[-1] is initial_warning_state
+
+
+def test_mute_mupdf_diagnostics_redirects_fd_stderr(capfd):
+    parse = _load_parse_module()
+
+    with parse._mute_mupdf_diagnostics():
+        os.write(2, b"fd-stderr-noise\n")
+
+    captured = capfd.readouterr()
+    assert "fd-stderr-noise" not in captured.err
+
+
+def test_summarize_mupdf_warnings_suppresses_low_risk_lines(monkeypatch):
+    parse = _load_parse_module()
+    monkeypatch.setattr(
+        parse.fitz.TOOLS,
+        "mupdf_warnings",
+        lambda: (
+            "bogus font ascent/descent values (0 / 0)\n"
+            "invalid marked content and clip nesting\n"
+        ),
+    )
+
+    assert parse._summarize_mupdf_warnings() is None
+
+
+def test_summarize_mupdf_warnings_keeps_high_risk_lines(monkeypatch):
+    parse = _load_parse_module()
+    monkeypatch.setattr(
+        parse.fitz.TOOLS,
+        "mupdf_warnings",
+        lambda: (
+            "bogus font ascent/descent values (0 / 0)\n"
+            "Actualtext with no position. Text may be lost or mispositioned.\n"
+            "syntax error: unknown keyword: 'pagesize'\n"
+        ),
+    )
+
+    summary = parse._summarize_mupdf_warnings()
+    assert summary is not None
+    assert "MuPDF warnings:" in summary
+    assert "Actualtext with no position" in summary
+    assert "syntax error: unknown keyword: 'pagesize'" in summary
+    assert "bogus font ascent/descent values" not in summary

@@ -142,6 +142,38 @@ def load_parsed_document(path: Path) -> ParsedDocument:
     return ParsedDocument(doc_id=doc_id, pdf_path=pdf_path, pages=pages)
 
 
+def _decode_tokens_with_char_offsets(
+    tokens: list[int],
+    encoder: Encoding,
+) -> tuple[str, list[int]]:
+    """Decode tokenized text and return character offsets per token boundary.
+
+    Args:
+        tokens: Token IDs from the full page text.
+        encoder: Tokenizer encoder used for decode operations.
+    Returns:
+        Tuple of decoded page text and character offsets of length len(tokens) + 1.
+        The final offset is the decoded text length.
+    Edge cases:
+        Falls back to prefix decoding when decode_with_offsets is unavailable or
+        fails, prioritizing output correctness over speed.
+    """
+
+    try:
+        decoded_text, token_offsets = encoder.decode_with_offsets(tokens)
+        if len(token_offsets) != len(tokens):
+            raise ValueError("decode_with_offsets returned unexpected offset count")
+        return decoded_text, [*token_offsets, len(decoded_text)]
+    except Exception:  # pragma: no cover - fallback for tokenizer edge cases
+        LOGGER.warning("Falling back to prefix decode for token-char offsets.")
+        decoded_text = encoder.decode(tokens)
+        token_offsets = [0]
+        for index in range(1, len(tokens)):
+            token_offsets.append(len(encoder.decode(tokens[:index])))
+        token_offsets.append(len(decoded_text))
+        return decoded_text, token_offsets
+
+
 def chunk_page(
     page_text: str,
     page_num: int,
@@ -179,10 +211,7 @@ def chunk_page(
     if not tokens:
         return []
 
-    token_texts = [encoder.decode([token]) for token in tokens]
-    char_offsets = [0]
-    for token_text in token_texts:
-        char_offsets.append(char_offsets[-1] + len(token_text))
+    decoded_page_text, char_offsets = _decode_tokens_with_char_offsets(tokens, encoder)
 
     chunks: list[ChunkRecord] = []
     start = 0
@@ -190,9 +219,9 @@ def chunk_page(
 
     while start < len(tokens):
         end = min(start + config.target_tokens, len(tokens))
-        chunk_text = "".join(token_texts[start:end])
         char_start = char_offsets[start]
         char_end = char_offsets[end]
+        chunk_text = decoded_page_text[char_start:char_end]
         chunk_uid = compute_chunk_uid(
             doc_id=doc_id,
             page_number=page_num,
