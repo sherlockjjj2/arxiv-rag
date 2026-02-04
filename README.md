@@ -268,6 +268,7 @@ uv run python -m arxiv_rag.cli query "How does dense retrieval work?" --mode hyb
 Notes:
 
 - `--generate` formats retrieved chunks into a citation prompt and returns a cited answer.
+- Generated answers apply a citation post-processing pass that remaps each citation to the best-supported retrieved `(paper_id, page_number)` using quote overlap.
 - `--verify` requires `--generate` and validates the generated answer only.
 - Default generation model is `gpt-4o-mini`; override with `--generate-model`.
 - `--verify` enforces paragraph-level citation coverage and quote matching against page text.
@@ -317,6 +318,8 @@ Notes:
 
 - Edit `eval/eval_set.json` manually to review or correct QA pairs before running eval.
 - Citation accuracy is only computed when `--generate` is enabled.
+- Eval summary includes `citation_accuracy_when_recall5_hit` to separate retrieval misses from citation selection issues.
+- Failure modes distinguish `citation_absent` (no parsed citations) from `citation_zero_score` (citations present but none matched ground truth).
 
 ### Inspect Chroma counts
 

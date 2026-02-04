@@ -167,3 +167,50 @@ def test_generate_answer_uses_prompt_and_model(monkeypatch: pytest.MonkeyPatch) 
     assert "[arXiv:1234.5678 p.1]" in str(captured["prompt"])
     assert isinstance(captured.get("config"), GenerationConfig)
     assert getattr(captured["config"], "model") == "gpt-4o-mini"
+
+
+def test_remap_citations_by_quote_overlap_rewrites_citation() -> None:
+    generate, Chunk, _ = _load_generate()
+    chunks = [
+        Chunk(
+            paper_id="2204.02311",
+            page_number=47,
+            text="There is potential for malicious use of such large LMs.",
+            chunk_uid="u1",
+        ),
+        Chunk(
+            paper_id="2005.14165",
+            page_number=35,
+            text="Malicious uses of language models can be somewhat difficult to define.",
+            chunk_uid="u2",
+        ),
+    ]
+    answer = (
+        "Large language models can be abused for harmful automation "
+        '[arXiv:9999.0000 p.1] *"potential for malicious use of such large LMs"*.'
+    )
+
+    remapped = generate.remap_citations_by_quote_overlap(answer, chunks)
+
+    assert "[arXiv:2204.02311 p.47]" in remapped
+    assert "[arXiv:9999.0000 p.1]" not in remapped
+
+
+def test_remap_citations_by_quote_overlap_keeps_unmatched_citation() -> None:
+    generate, Chunk, _ = _load_generate()
+    chunks = [
+        Chunk(
+            paper_id="2204.02311",
+            page_number=47,
+            text="There is potential for malicious use of such large LMs.",
+            chunk_uid="u1",
+        )
+    ]
+    answer = (
+        "This claim has weak evidence "
+        '[arXiv:1234.5678 p.1] *"completely unrelated phrase tokens"*.'
+    )
+
+    remapped = generate.remap_citations_by_quote_overlap(answer, chunks)
+
+    assert remapped == answer
