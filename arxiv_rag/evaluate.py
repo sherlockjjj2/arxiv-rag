@@ -609,7 +609,9 @@ def _parse_json_payload(raw_text: str) -> object | None:
     return None
 
 
-def _extract_json_segment(raw_text: str, start_token: str, end_token: str) -> str | None:
+def _extract_json_segment(
+    raw_text: str, start_token: str, end_token: str
+) -> str | None:
     """Extract a JSON segment bounded by start/end tokens.
 
     Args:
@@ -750,9 +752,7 @@ def generate_eval_set(
     if not candidate_uids:
         raise ValueError("No chunks available for eval generation.")
     if n_questions > len(candidate_uids) * questions_per_chunk:
-        raise ValueError(
-            "Not enough chunks to satisfy requested questions per chunk."
-        )
+        raise ValueError("Not enough chunks to satisfy requested questions per chunk.")
 
     rng = random.Random(0 if seed is None else seed)
     rng.shuffle(candidate_uids)
@@ -768,7 +768,9 @@ def generate_eval_set(
             if chunk is None:
                 continue
 
-            prompt = render_eval_prompt(template, chunk=chunk, n_questions=questions_per_chunk)
+            prompt = render_eval_prompt(
+                template, chunk=chunk, n_questions=questions_per_chunk
+            )
             LOGGER.debug(
                 "Eval QA prompt chunk_uid=%s text_chars=%s",
                 chunk.chunk_uid,
@@ -777,7 +779,9 @@ def generate_eval_set(
             try:
                 result = client.generate_questions(prompt=prompt)
             except (ValueError, APIError, APITimeoutError, RateLimitError) as exc:
-                LOGGER.warning("Eval QA generation failed for %s: %s", chunk.chunk_uid, exc)
+                LOGGER.warning(
+                    "Eval QA generation failed for %s: %s", chunk.chunk_uid, exc
+                )
                 continue
 
             for question in result.questions:
@@ -1107,7 +1111,9 @@ def _run_retrieval(
     if retrieval_config.mode == "fts":
         results = search_fts(query, top_k=retrieval_config.top_k, db_path=db_path)
     elif retrieval_config.mode == "vector":
-        embeddings_client = EmbeddingsClient(EmbeddingsConfig(model=retrieval_config.model))
+        embeddings_client = EmbeddingsClient(
+            EmbeddingsConfig(model=retrieval_config.model)
+        )
         chroma_config = ChromaConfig(
             persist_dir=retrieval_config.chroma_dir,
             collection_name=retrieval_config.collection,
@@ -1124,7 +1130,9 @@ def _run_retrieval(
         except ImportError as exc:
             raise ValueError(str(exc)) from exc
     else:
-        embeddings_client = EmbeddingsClient(EmbeddingsConfig(model=retrieval_config.model))
+        embeddings_client = EmbeddingsClient(
+            EmbeddingsConfig(model=retrieval_config.model)
+        )
         chroma_config = ChromaConfig(
             persist_dir=retrieval_config.chroma_dir,
             collection_name=retrieval_config.collection,
@@ -1274,9 +1282,7 @@ def render_report_markdown(report: EvalReport) -> str:
     diagnostics = [
         item
         for item in report.items
-        if item.recall_at_5 == 0.0
-        or item.citation_error
-        or item.generation_error
+        if item.recall_at_5 == 0.0 or item.citation_error or item.generation_error
     ]
     if diagnostics:
         lines.extend(["", "## Per-Query Diagnostics"])

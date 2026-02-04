@@ -866,11 +866,11 @@ def evaluate(eval_set: list[dict]) -> dict:
 
 **Goal**: Know how good/bad your system is
 
-- [ ] Generate synthetic QA pairs (50 questions)
-- [ ] Manual review and correction of QA pairs
-- [ ] Implement eval metrics
-- [ ] Run eval, identify failure modes
-- [ ] Query logging to SQLite
+- [x] Generate synthetic QA pairs (50 questions)
+- [x] Manual review and correction of QA pairs
+- [x] Implement eval metrics
+- [x] Run eval, identify failure modes
+- [x] Query logging to SQLite
 
 **Deliverable**: Eval report showing Recall@5, MRR, citation accuracy
 
