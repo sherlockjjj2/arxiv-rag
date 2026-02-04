@@ -76,6 +76,20 @@ def _remove_repeated_lines(pages: list[dict], repeated_lines: set[str]) -> int:
 def _parse_pdf_with_warnings(
     pdf_path: Path, *, remove_headers_footers: bool
 ) -> tuple[dict, list[str]]:
+    """Parse a PDF and collect non-fatal extraction warnings.
+
+    Args:
+        pdf_path: Path to the source PDF file.
+        remove_headers_footers: Whether to remove repeated page boundary lines.
+    Returns:
+        Tuple of parsed payload and warning messages.
+    Raises:
+        FileNotFoundError: If the PDF path does not exist.
+        ValueError: If the PDF cannot be opened or read.
+    Edge cases:
+        Pages that fail extraction are skipped with warnings.
+    """
+
     warnings: list[str] = []
 
     if not pdf_path.exists() or not pdf_path.is_file():
@@ -141,6 +155,34 @@ def parse_pdf(pdf_path: str, *, remove_headers_footers: bool = False) -> dict:
         Path(pdf_path), remove_headers_footers=remove_headers_footers
     )
     return result
+
+
+def parse_pdf_with_warnings(
+    pdf_path: str | Path,
+    *,
+    remove_headers_footers: bool = False,
+) -> tuple[dict, list[str]]:
+    """Parse an arXiv-style PDF into per-page text and warnings.
+
+    Args:
+        pdf_path: Path to a PDF file on disk.
+        remove_headers_footers: Remove repeated header/footer lines when True.
+
+    Returns:
+        Tuple of parsed metadata and warning messages.
+
+    Raises:
+        FileNotFoundError: When the PDF file does not exist.
+        ValueError: When the PDF cannot be opened or read.
+
+    Edge cases:
+        Pages that fail to extract are skipped; warnings include skipped page info.
+    """
+
+    return _parse_pdf_with_warnings(
+        Path(pdf_path),
+        remove_headers_footers=remove_headers_footers,
+    )
 
 
 def _parse_args() -> argparse.Namespace:

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -14,8 +15,15 @@ from uuid import uuid4
 import typer
 from dotenv import load_dotenv
 from openai import APIError, APITimeoutError, RateLimitError
+from rich.console import Console
+from rich.progress import track
+from rich.table import Table
 from tiktoken import Encoding, get_encoding
 
+from arxiv_rag import chunk as chunk_module
+from arxiv_rag import download as download_module
+from arxiv_rag import parse as parse_module
+from arxiv_rag.arxiv_ids import base_id_from_versioned, is_valid_base_id
 from arxiv_rag.chroma_client import ChromaConfig
 from arxiv_rag.chroma_inspect import inspect_chroma_counts
 from arxiv_rag.db import (
@@ -46,6 +54,7 @@ from arxiv_rag.retrieve import (
 from arxiv_rag.verify import verify_answer
 
 app = typer.Typer(help="CLI for arXiv RAG utilities.")
+console = Console()
 
 
 @app.callback(invoke_without_command=True)
@@ -266,6 +275,373 @@ def _safe_log_query(db: Path, entry: QueryLogEntry) -> None:
         insert_query_log(db, entry)
     except (FileNotFoundError, ValueError, sqlite3.Error) as exc:
         typer.echo(f"Query log error: {exc}", err=True)
+
+
+@dataclass(frozen=True)
+class IngestFailure:
+    """Failure metadata for staged corpus ingestion."""
+
+    paper_id: str
+    stage: Literal["input", "download", "metadata", "parse", "chunk"]
+    message: str
+
+
+@dataclass(frozen=True)
+class IngestSummary:
+    """Summary report for add-ids/rebuild ingestion runs."""
+
+    requested_count: int
+    parsed_count: int
+    chunked_count: int
+    indexed_chunks: int
+    failures: list[IngestFailure]
+    warnings: list[str]
+
+
+def _load_base_ids_from_file(path: Path) -> list[str]:
+    """Load raw arXiv IDs from a .txt or .json file."""
+
+    if not path.exists() or not path.is_file():
+        raise FileNotFoundError(f"IDs file not found: {path}")
+
+    suffix = path.suffix.lower()
+    if suffix == ".txt":
+        lines = path.read_text(encoding="utf-8").splitlines()
+        return [
+            line.strip()
+            for line in lines
+            if line.strip() and not line.strip().startswith("#")
+        ]
+    if suffix == ".json":
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid JSON in {path}: {exc}") from exc
+        if isinstance(payload, list):
+            if all(isinstance(item, str) for item in payload):
+                return [item.strip() for item in payload if item.strip()]
+            raise ValueError("JSON list payload must contain only string IDs.")
+        if isinstance(payload, dict) and "ids" in payload:
+            ids_value = payload["ids"]
+            if isinstance(ids_value, list) and all(
+                isinstance(item, str) for item in ids_value
+            ):
+                return [item.strip() for item in ids_value if item.strip()]
+            raise ValueError("JSON object payload requires string list under 'ids'.")
+        raise ValueError("JSON payload must be a string list or {'ids': [...]} object.")
+    raise ValueError("IDs file must use .txt or .json extension.")
+
+
+def _normalize_base_ids(raw_ids: list[str]) -> tuple[list[str], list[str]]:
+    """Normalize, dedupe, and validate arXiv IDs."""
+
+    normalized_ids: list[str] = []
+    invalid_ids: list[str] = []
+    seen: set[str] = set()
+
+    for raw_id in raw_ids:
+        base_id = base_id_from_versioned(raw_id.strip())
+        if not base_id:
+            continue
+        if base_id in seen:
+            continue
+        seen.add(base_id)
+        if is_valid_base_id(base_id):
+            normalized_ids.append(base_id)
+        else:
+            invalid_ids.append(base_id)
+
+    return normalized_ids, invalid_ids
+
+
+def _build_download_config(
+    *,
+    pdf_dir: Path,
+    db: Path,
+) -> download_module.DownloadConfig:
+    """Build a download config with CLI-overridden paths."""
+
+    base_config = download_module.default_config()
+    return replace(
+        base_config,
+        pdf_dir=pdf_dir,
+        id_index=pdf_dir / "arxiv_ids.txt",
+        default_db_path=db,
+    )
+
+
+def _parse_and_chunk_targets(
+    *,
+    targets: list[tuple[str, Path]],
+    db: Path,
+    parsed_dir: Path,
+    remove_headers_footers: bool,
+    target_tokens: int,
+    overlap_tokens: int,
+    chunk_encoding: str,
+    show_progress: bool,
+) -> tuple[int, int, list[str], list[IngestFailure], list[str]]:
+    """Parse PDFs and ingest chunk rows for target papers."""
+
+    parsed_dir.mkdir(parents=True, exist_ok=True)
+    chunk_config = chunk_module.ChunkConfig(
+        target_tokens=target_tokens,
+        overlap_tokens=overlap_tokens,
+        encoding_name=chunk_encoding,
+    )
+    parsed_count = 0
+    chunked_count = 0
+    doc_ids_for_reindex: list[str] = []
+    failures: list[IngestFailure] = []
+    warnings: list[str] = []
+
+    iterator = (
+        track(targets, description="Parsing + chunking papers")
+        if show_progress
+        else targets
+    )
+    with sqlite3.connect(db) as conn:
+        for paper_id, pdf_path in iterator:
+            try:
+                parsed_payload, parse_warnings = parse_module.parse_pdf_with_warnings(
+                    pdf_path,
+                    remove_headers_footers=remove_headers_footers,
+                )
+                parsed_count += 1
+            except (FileNotFoundError, ValueError) as exc:
+                failures.append(
+                    IngestFailure(paper_id=paper_id, stage="parse", message=str(exc))
+                )
+                continue
+
+            warnings.extend(f"{paper_id}: {warning}" for warning in parse_warnings)
+            parsed_path = parsed_dir / f"{pdf_path.stem}.json"
+            try:
+                parsed_path.write_text(
+                    json.dumps(parsed_payload, indent=2),
+                    encoding="utf-8",
+                )
+                parsed_doc = chunk_module.load_parsed_document(parsed_path)
+                chunks = chunk_module.chunk_document(parsed_doc, paper_id, chunk_config)
+                previous_doc_id = chunk_module.ingest_chunks(
+                    conn,
+                    parsed_doc,
+                    paper_id,
+                    chunks,
+                )
+                conn.commit()
+            except (OSError, ValueError, sqlite3.Error) as exc:
+                conn.rollback()
+                failures.append(
+                    IngestFailure(paper_id=paper_id, stage="chunk", message=str(exc))
+                )
+                continue
+
+            chunked_count += 1
+            doc_ids_for_reindex.append(parsed_doc.doc_id)
+            if previous_doc_id and previous_doc_id != parsed_doc.doc_id:
+                doc_ids_for_reindex.append(previous_doc_id)
+
+    unique_doc_ids = list(dict.fromkeys(doc_ids_for_reindex))
+    return parsed_count, chunked_count, unique_doc_ids, failures, warnings
+
+
+def _print_ingest_summary(summary: IngestSummary) -> None:
+    """Print a human-readable ingestion summary."""
+
+    table = Table(title="Ingest Summary")
+    table.add_column("Metric")
+    table.add_column("Value", justify="right")
+    table.add_row("Requested papers", str(summary.requested_count))
+    table.add_row("Parsed papers", str(summary.parsed_count))
+    table.add_row("Chunked papers", str(summary.chunked_count))
+    table.add_row("Indexed chunks", str(summary.indexed_chunks))
+    table.add_row("Warnings", str(len(summary.warnings)))
+    table.add_row("Failures", str(len(summary.failures)))
+    console.print(table)
+
+    for warning in summary.warnings:
+        typer.echo(f"Warning: {warning}", err=True)
+
+    if summary.failures:
+        typer.echo("Failures:", err=True)
+        for failure in summary.failures:
+            typer.echo(
+                f"- {failure.paper_id} [{failure.stage}] {failure.message}",
+                err=True,
+            )
+
+
+def _run_ingest_and_index(
+    *,
+    add_ids: Path | None,
+    rebuild: bool,
+    db: Path,
+    pdf_dir: Path,
+    parsed_dir: Path,
+    remove_headers_footers: bool,
+    target_tokens: int,
+    overlap_tokens: int,
+    chunk_encoding: str,
+    download_retries: int,
+    download_timeout: int,
+    show_progress: bool,
+    chroma_config: ChromaConfig,
+    embeddings_config: EmbeddingsConfig,
+    batch_size: int | None,
+    force_delete: bool,
+) -> IngestSummary:
+    """Run add-ids/rebuild ingestion and index updated doc_ids."""
+
+    if add_ids is None and not rebuild:
+        raise ValueError("Expected --add-ids or --rebuild for ingest workflow.")
+
+    if target_tokens <= 0:
+        raise ValueError("target_tokens must be > 0")
+    if overlap_tokens < 0:
+        raise ValueError("overlap_tokens must be >= 0")
+    if overlap_tokens >= target_tokens:
+        raise ValueError("overlap_tokens must be < target_tokens")
+    if download_retries <= 0:
+        raise ValueError("download_retries must be > 0")
+    if download_timeout <= 0:
+        raise ValueError("download_timeout must be > 0")
+
+    config = _build_download_config(pdf_dir=pdf_dir, db=db)
+    failures: list[IngestFailure] = []
+    warnings: list[str] = []
+
+    if add_ids is not None:
+        raw_ids = _load_base_ids_from_file(add_ids)
+        normalized_ids, invalid_ids = _normalize_base_ids(raw_ids)
+        if invalid_ids:
+            for base_id in invalid_ids:
+                failures.append(
+                    IngestFailure(
+                        paper_id=base_id,
+                        stage="input",
+                        message="Invalid arXiv ID format.",
+                    )
+                )
+        if not normalized_ids:
+            return IngestSummary(
+                requested_count=0,
+                parsed_count=0,
+                chunked_count=0,
+                indexed_chunks=0,
+                failures=failures,
+                warnings=warnings,
+            )
+
+        if show_progress:
+            typer.echo(f"Downloading {len(normalized_ids)} requested papers...")
+        download_module.download_by_ids(
+            normalized_ids,
+            retries=download_retries,
+            timeout=download_timeout,
+            db_path=db,
+            config=config,
+        )
+
+        missing_metadata_ids = set(
+            download_module.upsert_metadata_for_ids(
+                normalized_ids,
+                db_path=db,
+                config=config,
+            )
+        )
+        latest_pdf_paths = download_module.collect_latest_pdf_paths(config)
+        targets: list[tuple[str, Path]] = []
+        for paper_id in normalized_ids:
+            if paper_id in missing_metadata_ids:
+                failures.append(
+                    IngestFailure(
+                        paper_id=paper_id,
+                        stage="metadata",
+                        message="Missing metadata or downloaded PDF.",
+                    )
+                )
+                continue
+            if (pdf_path := latest_pdf_paths.get(paper_id)) is None:
+                failures.append(
+                    IngestFailure(
+                        paper_id=paper_id,
+                        stage="download",
+                        message="Downloaded PDF not found on disk.",
+                    )
+                )
+                continue
+            targets.append((paper_id, pdf_path))
+        requested_count = len(normalized_ids)
+    else:
+        latest_pdf_paths = download_module.collect_latest_pdf_paths(config)
+        if not latest_pdf_paths:
+            return IngestSummary(
+                requested_count=0,
+                parsed_count=0,
+                chunked_count=0,
+                indexed_chunks=0,
+                failures=[],
+                warnings=[],
+            )
+        all_ids = sorted(latest_pdf_paths)
+        missing_metadata_ids = set(
+            download_module.upsert_metadata_for_ids(
+                all_ids,
+                db_path=db,
+                config=config,
+            )
+        )
+        targets = [
+            (paper_id, latest_pdf_paths[paper_id])
+            for paper_id in all_ids
+            if paper_id not in missing_metadata_ids
+        ]
+        for paper_id in sorted(missing_metadata_ids):
+            failures.append(
+                IngestFailure(
+                    paper_id=paper_id,
+                    stage="metadata",
+                    message="Missing metadata for local PDF.",
+                )
+            )
+        requested_count = len(all_ids)
+
+    parsed_count, chunked_count, doc_ids, stage_failures, stage_warnings = (
+        _parse_and_chunk_targets(
+            targets=targets,
+            db=db,
+            parsed_dir=parsed_dir,
+            remove_headers_footers=remove_headers_footers,
+            target_tokens=target_tokens,
+            overlap_tokens=overlap_tokens,
+            chunk_encoding=chunk_encoding,
+            show_progress=show_progress,
+        )
+    )
+    failures.extend(stage_failures)
+    warnings.extend(stage_warnings)
+
+    indexed_chunks = 0
+    if doc_ids:
+        indexed_chunks = index_chunks(
+            db_path=db,
+            chroma_config=chroma_config,
+            embeddings_config=embeddings_config,
+            doc_ids=doc_ids,
+            limit=None,
+            batch_size=batch_size,
+            force_delete=force_delete,
+        )
+
+    return IngestSummary(
+        requested_count=requested_count,
+        parsed_count=parsed_count,
+        chunked_count=chunked_count,
+        indexed_chunks=indexed_chunks,
+        failures=failures,
+        warnings=warnings,
+    )
 
 
 @app.command()
@@ -812,6 +1188,7 @@ def eval_run(
     )
     typer.echo(f"Wrote reports to {output_base}.json and {output_base}.md")
 
+
 @dataclass(frozen=True)
 class _ChunkToEmbed:
     chunk_id: int
@@ -980,8 +1357,53 @@ def index(
         False,
         help="Allow deleting existing vectors even when --limit is set.",
     ),
+    add_ids: Path | None = typer.Option(
+        None,
+        help="Path to a .txt/.json file of arXiv IDs to download and ingest.",
+    ),
+    rebuild: bool = typer.Option(
+        False,
+        help="Rebuild parse/chunks/vector index from local PDFs.",
+    ),
+    pdf_dir: Path = typer.Option(
+        Path("data/arxiv-papers"),
+        help="Directory containing downloaded arXiv PDFs.",
+    ),
+    parsed_dir: Path = typer.Option(
+        Path("data/parsed"),
+        help="Directory to write parsed JSON files.",
+    ),
+    remove_headers_footers: bool = typer.Option(
+        False,
+        help="Remove repeated page headers/footers during parsing.",
+    ),
+    target_tokens: int = typer.Option(
+        512,
+        help="Target token size for chunking.",
+    ),
+    overlap_tokens: int = typer.Option(
+        100,
+        help="Token overlap between adjacent chunks.",
+    ),
+    chunk_encoding: str = typer.Option(
+        "cl100k_base",
+        help="Tokenizer encoding used for chunking.",
+    ),
+    download_retries: int = typer.Option(
+        3,
+        help="Download retries per paper when using --add-ids.",
+    ),
+    download_timeout: int = typer.Option(
+        30,
+        help="Download timeout in seconds when using --add-ids.",
+    ),
+    progress: bool = typer.Option(
+        True,
+        "--progress/--no-progress",
+        help="Show progress bars for parsing/chunking.",
+    ),
 ) -> None:
-    """Generate embeddings and index into Chroma."""
+    """Generate embeddings or run full ingest + index workflows."""
 
     logging.basicConfig(level=logging.INFO)
     logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -995,6 +1417,58 @@ def index(
         max_request_tokens=max_request_tokens,
         max_input_tokens=max_input_tokens,
     )
+
+    if add_ids and rebuild:
+        typer.echo("--add-ids and --rebuild cannot be used together.", err=True)
+        raise typer.Exit(code=1)
+
+    if add_ids is not None or rebuild:
+        if doc_id:
+            typer.echo("--doc-id cannot be used with --add-ids/--rebuild.", err=True)
+            raise typer.Exit(code=1)
+        if limit is not None:
+            typer.echo("--limit cannot be used with --add-ids/--rebuild.", err=True)
+            raise typer.Exit(code=1)
+        try:
+            summary = _run_ingest_and_index(
+                add_ids=add_ids,
+                rebuild=rebuild,
+                db=db,
+                pdf_dir=pdf_dir,
+                parsed_dir=parsed_dir,
+                remove_headers_footers=remove_headers_footers,
+                target_tokens=target_tokens,
+                overlap_tokens=overlap_tokens,
+                chunk_encoding=chunk_encoding,
+                download_retries=download_retries,
+                download_timeout=download_timeout,
+                show_progress=progress,
+                chroma_config=chroma_config,
+                embeddings_config=embeddings_config,
+                batch_size=batch_size,
+                force_delete=force_delete,
+            )
+        except FileNotFoundError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=1) from exc
+        except ValueError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=1) from exc
+        except ImportError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=1) from exc
+        except sqlite3.Error as exc:
+            typer.echo(f"SQLite error: {exc}", err=True)
+            raise typer.Exit(code=2) from exc
+
+        if summary.requested_count == 0 and not summary.failures:
+            typer.echo("No papers found to ingest.")
+            raise typer.Exit(code=0)
+
+        _print_ingest_summary(summary)
+        if summary.failures:
+            raise typer.Exit(code=1)
+        raise typer.Exit(code=0)
 
     try:
         total = index_chunks(
