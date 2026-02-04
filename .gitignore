@@ -29,8 +29,8 @@ build/
 
 # Eval Result
 eval/results/
+eval/cache/
 .idea/
 
 # OS trash
 Thumbs.db
-

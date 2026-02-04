@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import random
@@ -683,6 +684,27 @@ class CachedEmbeddingsClient:
         )
 
 
+@dataclass
+class _EvalComputation:
+    """Intermediate per-query evaluation state before final report assembly."""
+
+    item: EvalItem
+    retrieval_results: list[ChunkResult | HybridChunkResult]
+    warnings: list[str]
+    retrieved_uids: list[str]
+    recall_at_5: float
+    recall_at_10: float
+    mrr: float
+    first_correct_rank: int | None
+    citation_count: int | None = None
+    citation_accuracy: float | None = None
+    citation_error: str | None = None
+    generation_error: str | None = None
+
+
+_GenerationCacheKey = tuple[str, str, str, str]
+
+
 class EvalGenerationClient:
     """Thin wrapper around OpenAI chat completions for eval QA generation."""
 
@@ -1279,6 +1301,7 @@ def run_eval(
     generate: bool,
     generate_model: str,
     generation_top_k: int,
+    generation_concurrency: int = 4,
     cache_db_path: Path | None = None,
 ) -> EvalReport:
     """Run evaluation for an eval set.
@@ -1290,6 +1313,7 @@ def run_eval(
         generate: Whether to run generation and compute citation accuracy.
         generate_model: Model name for answer generation.
         generation_top_k: Number of chunks to pass to the generator.
+        generation_concurrency: Maximum concurrent generation requests.
         cache_db_path: Optional SQLite cache path for embeddings/answers.
     Returns:
         EvalReport with per-item results and summary metrics.
@@ -1302,6 +1326,8 @@ def run_eval(
         raise FileNotFoundError(f"Database not found: {db_path}")
     if generation_top_k <= 0:
         raise ValueError("generation_top_k must be > 0")
+    if generation_concurrency <= 0:
+        raise ValueError("generation_concurrency must be > 0")
 
     cache = EvalCache(cache_db_path) if cache_db_path is not None else None
     prompt_version = (
@@ -1322,12 +1348,7 @@ def run_eval(
             distance=retrieval_config.distance,
         )
 
-    results: list[EvalItemResult] = []
-    recall_5_scores: list[float] = []
-    recall_10_scores: list[float] = []
-    mrr_scores: list[float] = []
-    citation_scores: list[float] = []
-    citation_scores_recall5_hit: list[float] = []
+    computations: list[_EvalComputation] = []
 
     try:
         for item in eval_set.eval_set:
@@ -1356,85 +1377,62 @@ def run_eval(
                 item.ground_truth.chunk_uids,
             )
 
-            recall_5_scores.append(recall_5)
-            recall_10_scores.append(recall_10)
-            mrr_scores.append(mrr)
-
-            citation_count = None
-            citation_accuracy = None
-            citation_error = None
-            generation_error = None
-
-            if generate:
-                generation_chunks = _build_generation_chunks(
-                    retrieval_results,
-                    generation_top_k,
-                )
-                chunk_uids_hash = _hash_chunk_uids(generation_chunks)
-                answer = None
-                if cache is not None and prompt_version is not None:
-                    answer = cache.get_generated_answer(
-                        query=item.query,
-                        generation_model=generate_model,
-                        prompt_version=prompt_version,
-                        chunk_uids_hash=chunk_uids_hash,
-                    )
-                if answer is None:
-                    try:
-                        answer = generate_answer(
-                            item.query,
-                            generation_chunks,
-                            model=generate_model,
-                        )
-                    except ValueError as exc:
-                        generation_error = str(exc)
-                    except RuntimeError as exc:
-                        generation_error = str(exc)
-                    else:
-                        if cache is not None and prompt_version is not None:
-                            cache.set_generated_answer(
-                                query=item.query,
-                                generation_model=generate_model,
-                                prompt_version=prompt_version,
-                                chunk_uids_hash=chunk_uids_hash,
-                                answer=answer,
-                            )
-
-                if answer is not None:
-                    try:
-                        citations = parse_citations(answer)
-                        citation_count = len(citations)
-                        citation_accuracy = _score_citations_for_item(
-                            citations,
-                            ground_truth_chunk_uids=item.ground_truth.chunk_uids,
-                            db_path=db_path,
-                        )
-                        citation_scores.append(citation_accuracy)
-                        if recall_5 > 0.0:
-                            citation_scores_recall5_hit.append(citation_accuracy)
-                    except ValueError as exc:
-                        citation_error = str(exc)
-
-            results.append(
-                EvalItemResult(
-                    query_id=item.query_id,
-                    query=item.query,
+            computations.append(
+                _EvalComputation(
+                    item=item,
+                    retrieval_results=retrieval_results,
+                    warnings=warnings,
+                    retrieved_uids=retrieved_uids,
                     recall_at_5=recall_5,
                     recall_at_10=recall_10,
                     mrr=mrr,
                     first_correct_rank=first_rank,
-                    retrieved_chunk_uids=retrieved_uids,
-                    ground_truth_chunk_uids=list(item.ground_truth.chunk_uids),
-                    citation_count=citation_count,
-                    citation_accuracy=citation_accuracy,
-                    citation_error=citation_error,
-                    generation_error=generation_error,
-                    warnings=warnings,
                 )
+            )
+
+        if generate and computations:
+            _run_generation_stage(
+                computations=computations,
+                db_path=db_path,
+                generate_model=generate_model,
+                generation_top_k=generation_top_k,
+                generation_concurrency=generation_concurrency,
+                cache=cache,
+                prompt_version=prompt_version,
             )
     finally:
         if cache is not None:
             cache.close()
+
+    results = [
+        EvalItemResult(
+            query_id=computation.item.query_id,
+            query=computation.item.query,
+            recall_at_5=computation.recall_at_5,
+            recall_at_10=computation.recall_at_10,
+            mrr=computation.mrr,
+            first_correct_rank=computation.first_correct_rank,
+            retrieved_chunk_uids=computation.retrieved_uids,
+            ground_truth_chunk_uids=list(computation.item.ground_truth.chunk_uids),
+            citation_count=computation.citation_count,
+            citation_accuracy=computation.citation_accuracy,
+            citation_error=computation.citation_error,
+            generation_error=computation.generation_error,
+            warnings=computation.warnings,
+        )
+        for computation in computations
+    ]
+
+    recall_5_scores = [computation.recall_at_5 for computation in computations]
+    recall_10_scores = [computation.recall_at_10 for computation in computations]
+    mrr_scores = [computation.mrr for computation in computations]
+    citation_scores: list[float] = []
+    citation_scores_recall5_hit: list[float] = []
+    for computation in computations:
+        if computation.citation_accuracy is not None:
+            citation_scores.append(computation.citation_accuracy)
+            if computation.recall_at_5 > 0.0:
+                citation_scores_recall5_hit.append(computation.citation_accuracy)
 
     summary = EvalSummary(
         recall_at_5=_mean(recall_5_scores),
@@ -1454,6 +1452,326 @@ def run_eval(
         failures=failures,
         items=results,
     )
+
+
+def _run_generation_stage(
+    *,
+    computations: Sequence[_EvalComputation],
+    db_path: Path,
+    generate_model: str,
+    generation_top_k: int,
+    generation_concurrency: int,
+    cache: EvalCache | None,
+    prompt_version: str | None,
+) -> None:
+    """Run generation for eval items concurrently and update computations in place.
+
+    Args:
+        computations: Per-item retrieval/metric computations.
+        db_path: SQLite database path for citation scoring.
+        generate_model: Generation model name.
+        generation_top_k: Number of chunks to pass to generation.
+        generation_concurrency: Maximum number of in-flight generation requests.
+        cache: Optional eval cache.
+        prompt_version: Prompt hash for generated answer cache keys.
+    Raises:
+        ValueError: If generation_concurrency is not positive.
+    """
+
+    if generation_concurrency <= 0:
+        raise ValueError("generation_concurrency must be > 0")
+
+    if _has_running_event_loop():
+        LOGGER.debug(
+            "Running event loop detected; using synchronous generation fallback."
+        )
+        for computation in computations:
+            _generate_for_computation_sync(
+                computation=computation,
+                db_path=db_path,
+                generate_model=generate_model,
+                generation_top_k=generation_top_k,
+                cache=cache,
+                prompt_version=prompt_version,
+            )
+        return
+
+    asyncio.run(
+        _run_generation_stage_async(
+            computations=computations,
+            db_path=db_path,
+            generate_model=generate_model,
+            generation_top_k=generation_top_k,
+            generation_concurrency=generation_concurrency,
+            cache=cache,
+            prompt_version=prompt_version,
+        )
+    )
+
+
+def _has_running_event_loop() -> bool:
+    """Return whether the current thread already has an active event loop."""
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    return True
+
+
+async def _run_generation_stage_async(
+    *,
+    computations: Sequence[_EvalComputation],
+    db_path: Path,
+    generate_model: str,
+    generation_top_k: int,
+    generation_concurrency: int,
+    cache: EvalCache | None,
+    prompt_version: str | None,
+) -> None:
+    """Asynchronously generate answers and citation metrics for eval computations.
+
+    Args:
+        computations: Per-item retrieval/metric computations.
+        db_path: SQLite database path for citation scoring.
+        generate_model: Generation model name.
+        generation_top_k: Number of chunks to pass to generation.
+        generation_concurrency: Maximum number of in-flight generation requests.
+        cache: Optional eval cache.
+        prompt_version: Prompt hash for generated answer cache keys.
+    """
+
+    semaphore = asyncio.Semaphore(generation_concurrency)
+    answer_locks: dict[_GenerationCacheKey, asyncio.Lock] = {}
+    tasks = [
+        _generate_for_computation(
+            computation=computation,
+            db_path=db_path,
+            generate_model=generate_model,
+            generation_top_k=generation_top_k,
+            cache=cache,
+            prompt_version=prompt_version,
+            semaphore=semaphore,
+            answer_locks=answer_locks,
+        )
+        for computation in computations
+    ]
+    await asyncio.gather(*tasks)
+
+
+async def _generate_for_computation(
+    *,
+    computation: _EvalComputation,
+    db_path: Path,
+    generate_model: str,
+    generation_top_k: int,
+    cache: EvalCache | None,
+    prompt_version: str | None,
+    semaphore: asyncio.Semaphore,
+    answer_locks: dict[_GenerationCacheKey, asyncio.Lock],
+) -> None:
+    """Generate one answer, then parse and score citations for an eval computation.
+
+    This function also uses a per-key async lock when cache is enabled to avoid
+    duplicate cold-miss model calls for the same generation key within one run.
+    """
+
+    generation_chunks = _build_generation_chunks(
+        computation.retrieval_results,
+        generation_top_k,
+    )
+    chunk_uids_hash = _hash_chunk_uids(generation_chunks)
+    cache_key = _build_generation_cache_key(
+        query=computation.item.query,
+        generate_model=generate_model,
+        prompt_version=prompt_version,
+        chunk_uids_hash=chunk_uids_hash,
+    )
+
+    answer: str | None = None
+    if cache is not None and cache_key is not None:
+        answer = cache.get_generated_answer(
+            query=cache_key[0],
+            generation_model=cache_key[1],
+            prompt_version=cache_key[2],
+            chunk_uids_hash=cache_key[3],
+        )
+
+    if answer is None and cache is not None and cache_key is not None:
+        lock = answer_locks.setdefault(cache_key, asyncio.Lock())
+        async with lock:
+            answer = cache.get_generated_answer(
+                query=cache_key[0],
+                generation_model=cache_key[1],
+                prompt_version=cache_key[2],
+                chunk_uids_hash=cache_key[3],
+            )
+            if answer is None:
+                answer = await _generate_answer_with_semaphore(
+                    computation=computation,
+                    generate_model=generate_model,
+                    generation_chunks=generation_chunks,
+                    semaphore=semaphore,
+                )
+                if answer is not None:
+                    cache.set_generated_answer(
+                        query=cache_key[0],
+                        generation_model=cache_key[1],
+                        prompt_version=cache_key[2],
+                        chunk_uids_hash=cache_key[3],
+                        answer=answer,
+                    )
+    elif answer is None:
+        answer = await _generate_answer_with_semaphore(
+            computation=computation,
+            generate_model=generate_model,
+            generation_chunks=generation_chunks,
+            semaphore=semaphore,
+        )
+
+    if answer is None:
+        return
+
+    try:
+        citations = parse_citations(answer)
+        computation.citation_count = len(citations)
+        computation.citation_accuracy = _score_citations_for_item(
+            citations,
+            ground_truth_chunk_uids=computation.item.ground_truth.chunk_uids,
+            db_path=db_path,
+        )
+    except ValueError as exc:
+        computation.citation_error = str(exc)
+
+
+def _generate_for_computation_sync(
+    *,
+    computation: _EvalComputation,
+    db_path: Path,
+    generate_model: str,
+    generation_top_k: int,
+    cache: EvalCache | None,
+    prompt_version: str | None,
+) -> None:
+    """Generate one answer synchronously and update citation fields."""
+
+    generation_chunks = _build_generation_chunks(
+        computation.retrieval_results,
+        generation_top_k,
+    )
+    chunk_uids_hash = _hash_chunk_uids(generation_chunks)
+    cache_key = _build_generation_cache_key(
+        query=computation.item.query,
+        generate_model=generate_model,
+        prompt_version=prompt_version,
+        chunk_uids_hash=chunk_uids_hash,
+    )
+
+    answer: str | None = None
+    if cache is not None and cache_key is not None:
+        answer = cache.get_generated_answer(
+            query=cache_key[0],
+            generation_model=cache_key[1],
+            prompt_version=cache_key[2],
+            chunk_uids_hash=cache_key[3],
+        )
+
+    if answer is None:
+        answer = _generate_answer_sync(
+            computation=computation,
+            generate_model=generate_model,
+            generation_chunks=generation_chunks,
+        )
+        if answer is not None and cache is not None and cache_key is not None:
+            cache.set_generated_answer(
+                query=cache_key[0],
+                generation_model=cache_key[1],
+                prompt_version=cache_key[2],
+                chunk_uids_hash=cache_key[3],
+                answer=answer,
+            )
+
+    if answer is None:
+        return
+
+    try:
+        citations = parse_citations(answer)
+        computation.citation_count = len(citations)
+        computation.citation_accuracy = _score_citations_for_item(
+            citations,
+            ground_truth_chunk_uids=computation.item.ground_truth.chunk_uids,
+            db_path=db_path,
+        )
+    except ValueError as exc:
+        computation.citation_error = str(exc)
+
+
+def _generate_answer_sync(
+    *,
+    computation: _EvalComputation,
+    generate_model: str,
+    generation_chunks: list[GenerationChunk],
+) -> str | None:
+    """Generate an answer synchronously and capture generation errors."""
+
+    try:
+        return generate_answer(
+            computation.item.query,
+            generation_chunks,
+            model=generate_model,
+        )
+    except ValueError as exc:
+        computation.generation_error = str(exc)
+    except RuntimeError as exc:
+        computation.generation_error = str(exc)
+    return None
+
+
+async def _generate_answer_with_semaphore(
+    *,
+    computation: _EvalComputation,
+    generate_model: str,
+    generation_chunks: list[GenerationChunk],
+    semaphore: asyncio.Semaphore,
+) -> str | None:
+    """Generate an answer under a concurrency semaphore.
+
+    Args:
+        computation: Per-item eval computation state.
+        generate_model: Generation model name.
+        generation_chunks: Retrieved evidence chunks for generation.
+        semaphore: Concurrency limiter for generation calls.
+    Returns:
+        Generated answer text, or None when generation fails.
+    """
+
+    async with semaphore:
+        try:
+            return await asyncio.to_thread(
+                generate_answer,
+                computation.item.query,
+                generation_chunks,
+                generate_model,
+            )
+        except ValueError as exc:
+            computation.generation_error = str(exc)
+        except RuntimeError as exc:
+            computation.generation_error = str(exc)
+    return None
+
+
+def _build_generation_cache_key(
+    *,
+    query: str,
+    generate_model: str,
+    prompt_version: str | None,
+    chunk_uids_hash: str,
+) -> _GenerationCacheKey | None:
+    """Build a generated-answer cache key when prompt_version is available."""
+
+    if prompt_version is None:
+        return None
+    return (query, generate_model, prompt_version, chunk_uids_hash)
 
 
 def _run_retrieval(
