@@ -173,3 +173,26 @@ def test_query_cli_outputs_snippet(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert "[arXiv:2312.10997 p.3]" in result.output
     assert "Dense retrieval" in result.output
+
+
+def test_query_cli_handles_missing_db_without_traceback(tmp_path: Path) -> None:
+    missing_db = tmp_path / "missing.db"
+    cli = _load_cli_module()
+    runner = CliRunner()
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "query",
+            "dense retrieval",
+            "--mode",
+            "vector",
+            "--db",
+            str(missing_db),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "Database not found" in result.output
+    assert "Traceback" not in result.output
+    assert isinstance(result.exception, SystemExit)
