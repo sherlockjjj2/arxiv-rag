@@ -32,8 +32,11 @@ def test_compute_citation_accuracy() -> None:
     }
     ground_truth = ["u1", "u2"]
 
-    assert compute_citation_accuracy(
-        citations,
-        ground_truth_chunk_uids=ground_truth,
-        chunk_uids_by_page=mapping,
-    ) == 0.5
+    assert (
+        compute_citation_accuracy(
+            citations,
+            ground_truth_chunk_uids=ground_truth,
+            chunk_uids_by_page=mapping,
+        )
+        == 0.5
+    )

@@ -178,6 +178,42 @@ Notes:
 - When `--limit` is set, deletes are skipped to avoid partial reindexing; use `--force-delete` to allow deletes.
 - When `--doc-id` is provided, deletes occur even if no chunks exist for that doc_id.
 
+### Add Papers By ID File (`--add-ids`)
+
+Ingest additional papers end-to-end (download -> parse -> chunk -> index) from a file:
+
+```bash
+uv run python -m arxiv_rag.cli index --add-ids data/paper_ids.txt
+```
+
+```bash
+uv run python -m arxiv_rag.cli index --add-ids data/paper_ids.json
+```
+
+Supported file formats:
+
+- `.txt`: one ID per line, blank lines and `#` comments are ignored.
+- `.json`: either `["2312.10997", "2401.00001"]` or `{"ids": ["2312.10997", "2401.00001"]}`.
+
+Notes:
+
+- IDs can include versions (`v2`); they are normalized to base IDs.
+- The command writes parsed JSON files to `data/parsed/` by default.
+- Failures are isolated per paper and reported at the end.
+
+### Rebuild Local Corpus (`--rebuild`)
+
+Re-parse local PDFs and rebuild chunk + vector indexes:
+
+```bash
+uv run python -m arxiv_rag.cli index --rebuild
+```
+
+Notes:
+
+- Reads PDFs from `data/arxiv-papers/` by default.
+- Useful after changing parse/chunk settings (for example `--remove-headers-footers`, `--target-tokens`).
+
 ### Query vector embeddings (Chroma)
 
 ```bash

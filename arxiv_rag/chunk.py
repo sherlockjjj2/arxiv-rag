@@ -300,7 +300,7 @@ def _ingest_chunks(
     parsed_doc: ParsedDocument,
     paper_id: str,
     chunks: list[ChunkRecord],
-) -> None:
+) -> str | None:
     """Insert chunks into SQLite, replacing older versions."""
 
     conn.execute("PRAGMA foreign_keys = ON")
@@ -336,6 +336,27 @@ def _ingest_chunks(
         """,
         [chunk.as_row() for chunk in chunks],
     )
+    return existing_doc_id
+
+
+def ingest_chunks(
+    conn: sqlite3.Connection,
+    parsed_doc: ParsedDocument,
+    paper_id: str,
+    chunks: list[ChunkRecord],
+) -> str | None:
+    """Insert chunks into SQLite, replacing prior versions for a paper.
+
+    Args:
+        conn: Open SQLite connection.
+        parsed_doc: Parsed document payload with doc_id and pages.
+        paper_id: Base arXiv ID for the document.
+        chunks: Chunk rows to ingest.
+    Returns:
+        Previous doc_id stored for this paper, if any.
+    """
+
+    return _ingest_chunks(conn, parsed_doc, paper_id, chunks)
 
 
 def _iter_parsed_paths(paths: list[Path]) -> list[Path]:

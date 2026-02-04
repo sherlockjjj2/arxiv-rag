@@ -547,6 +547,18 @@ def _collect_pdf_paths(config: DownloadConfig | None = None) -> dict[str, Path]:
     return pdf_paths
 
 
+def collect_latest_pdf_paths(config: DownloadConfig | None = None) -> dict[str, Path]:
+    """Collect the newest downloaded PDF path for each base ID.
+
+    Args:
+        config: Optional configuration override.
+    Returns:
+        Mapping of base ID to the most recently modified PDF path.
+    """
+
+    return _collect_pdf_paths(config)
+
+
 def _backfill_metadata(
     db_path: Path,
     *,
@@ -597,6 +609,80 @@ def _backfill_metadata(
         _bulk_insert_metadata(db_path, metadata_rows)
         print(f"Metadata fetched and stored for {len(metadata_rows)} papers.")
     return 1 if missing_ids else 0
+
+
+def backfill_metadata(
+    db_path: Path,
+    *,
+    client: ArxivApiClient | None = None,
+    config: DownloadConfig | None = None,
+) -> int:
+    """Backfill metadata for downloaded PDFs.
+
+    Args:
+        db_path: SQLite database path.
+        client: Optional arXiv client wrapper.
+        config: Optional configuration override.
+    Returns:
+        Exit code (0 for success, 1 for missing metadata).
+    """
+
+    return _backfill_metadata(db_path, client=client, config=config)
+
+
+def upsert_metadata_for_ids(
+    ids: Sequence[str],
+    db_path: Path,
+    *,
+    client: ArxivApiClient | None = None,
+    config: DownloadConfig | None = None,
+) -> list[str]:
+    """Fetch and upsert metadata for specific IDs with local PDFs.
+
+    Args:
+        ids: Base arXiv IDs to upsert metadata for.
+        db_path: SQLite database path.
+        client: Optional arXiv client wrapper.
+        config: Optional configuration override.
+    Returns:
+        List of IDs that could not be upserted because metadata or PDFs were missing.
+    Raises:
+        ValueError: If any ID format is invalid.
+    Edge cases:
+        Returns an empty list when ids is empty.
+    """
+
+    resolved_config = _resolve_config(config)
+    resolved_client = _resolve_client(client, resolved_config)
+    unique_ids = _deduped_ids(ids)
+    if not unique_ids:
+        return []
+
+    if invalid_ids := validate_base_ids(unique_ids):
+        raise ValueError("Invalid arXiv IDs: " + ", ".join(sorted(invalid_ids)))
+
+    _ensure_db(db_path)
+    pdf_paths = _collect_pdf_paths(resolved_config)
+    available_ids = [base_id for base_id in unique_ids if base_id in pdf_paths]
+    missing_ids = [base_id for base_id in unique_ids if base_id not in pdf_paths]
+
+    if not available_ids:
+        return missing_ids
+
+    results = _fetch_results(
+        available_ids, client=resolved_client, config=resolved_config
+    )
+    metadata_rows: list[PaperMetadata] = []
+    for base_id in available_ids:
+        if (result := results.get(base_id)) is None:
+            missing_ids.append(base_id)
+            continue
+        metadata_rows.append(_metadata_from_result(result, pdf_paths[base_id]))
+
+    if metadata_rows:
+        _bulk_insert_metadata(db_path, metadata_rows)
+
+    return _deduped_ids(missing_ids)
 
 
 def _should_sync_id_index(config: DownloadConfig | None = None) -> bool:
@@ -839,6 +925,38 @@ def _download_by_id(
         _bulk_insert_metadata(db_path, metadata_rows)
         print(f"Metadata fetched and stored for {len(metadata_rows)} papers.")
     return 1 if failures else 0
+
+
+def download_by_ids(
+    ids: list[str],
+    retries: int,
+    timeout: int,
+    db_path: Path | None = None,
+    *,
+    client: ArxivApiClient | None = None,
+    config: DownloadConfig | None = None,
+) -> int:
+    """Download PDFs and optionally ingest metadata into SQLite.
+
+    Args:
+        ids: List of base arXiv IDs.
+        retries: Maximum download attempts per ID.
+        timeout: Request timeout in seconds.
+        db_path: Optional SQLite database path for metadata ingestion.
+        client: Optional arXiv client wrapper.
+        config: Optional configuration override.
+    Returns:
+        Exit code (0 for success, 1 for failures).
+    """
+
+    return _download_by_id(
+        ids,
+        retries=retries,
+        timeout=timeout,
+        db_path=db_path,
+        client=client,
+        config=config,
+    )
 
 
 def _parse_args(config: DownloadConfig | None = None) -> argparse.Namespace:
