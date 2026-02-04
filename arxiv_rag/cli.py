@@ -1128,6 +1128,15 @@ def eval_run(
         5,
         help="Number of chunks to pass into generation.",
     ),
+    cache_db: Path = typer.Option(
+        Path("eval/cache/eval_cache.db"),
+        help="SQLite cache path for eval embeddings and generated answers.",
+    ),
+    disable_cache: bool = typer.Option(
+        False,
+        "--disable-cache",
+        help="Disable persistent eval caching.",
+    ),
 ) -> None:
     """Run evaluation and write a report to disk."""
 
@@ -1171,6 +1180,7 @@ def eval_run(
             generate=generate,
             generate_model=generate_model,
             generation_top_k=effective_generation_top_k,
+            cache_db_path=None if disable_cache else cache_db,
         )
     except (FileNotFoundError, ValueError) as exc:
         typer.echo(str(exc), err=True)

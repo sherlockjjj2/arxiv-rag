@@ -320,6 +320,8 @@ Notes:
 - Citation accuracy is only computed when `--generate` is enabled.
 - Eval summary includes `citation_accuracy_when_recall5_hit` to separate retrieval misses from citation selection issues.
 - Failure modes distinguish `citation_absent` (no parsed citations) from `citation_zero_score` (citations present but none matched ground truth).
+- `eval-run` now uses a persistent SQLite cache by default at `eval/cache/eval_cache.db` for query embeddings and generated answers.
+- Use `--disable-cache` to force fresh API calls, or `--cache-db <path>` to override the cache location.
 
 ### Inspect Chroma counts
 
