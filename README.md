@@ -353,6 +353,13 @@ sqlite3 data/arxiv_rag.db "SELECT COUNT(*) AS papers FROM papers; SELECT COUNT(*
 
 ## Today's notes
 
+### 2026-02-04
+
+- Query error handling was tightened: expected retrieval failures now print clean messages with no traceback.
+- Exit code behavior is now consistent for query paths: `1` for user/input issues, `2` for system/runtime issues.
+- CLI docs were synced to current flags and behavior (`--eval-set-path`, `--verify` requires `--generate`).
+- Added a quick SQLite-based corpus stats command since there is no dedicated `stats` subcommand yet.
+
 ### 2026-02-03
 
 - Vector mode relies on Chroma; hybrid mode can fall back to SQLite embeddings if Chroma is missing or empty.
