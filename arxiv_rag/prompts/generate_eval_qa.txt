@@ -1,0 +1,28 @@
+You are creating evaluation questions from a single research paper excerpt.
+
+Constraints:
+- Use ONLY the information in the excerpt.
+- Generate $N_QUESTIONS distinct questions that this excerpt can answer.
+- Make the questions specific enough that this excerpt is clearly the best answer.
+- Provide a concise expected answer (1-3 sentences).
+- Set difficulty to "factual" or "synthesis".
+- Do NOT include citations in the answers.
+- Output ONLY valid JSON.
+
+Chunk metadata:
+- Paper ID: $PAPER_ID
+- Page: $PAGE_NUMBER
+- Chunk UID: $CHUNK_UID
+- Title: $TITLE
+
+Excerpt:
+$CHUNK_TEXT
+
+Output JSON array format:
+[
+  {
+    "question": "...",
+    "expected_answer": "...",
+    "difficulty": "factual"
+  }
+]

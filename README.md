@@ -229,6 +229,31 @@ Notes:
 
 - `sources` is an alias for `query --mode hybrid --verbose`.
 
+### Evaluation
+
+Generate a synthetic eval set (50 questions by default):
+
+```bash
+uv run python -m arxiv_rag.cli eval-generate --db data/arxiv_rag.db --output eval/eval_set.json
+```
+
+Run retrieval-only evaluation (Recall@5/10 + MRR):
+
+```bash
+uv run python -m arxiv_rag.cli eval-run --eval-set eval/eval_set.json --db data/arxiv_rag.db
+```
+
+Run evaluation with answer generation to compute chunk-level citation accuracy:
+
+```bash
+uv run python -m arxiv_rag.cli eval-run --eval-set eval/eval_set.json --db data/arxiv_rag.db --generate
+```
+
+Notes:
+
+- Edit `eval/eval_set.json` manually to review or correct QA pairs before running eval.
+- Citation accuracy is only computed when `--generate` is enabled.
+
 ### Inspect Chroma counts
 
 ```bash
@@ -242,6 +267,8 @@ uv run python -m arxiv_rag.cli inspect --db data/arxiv_rag.db
 - Parsed JSON: `data/parsed/`
 - SQLite DB: `data/arxiv_rag.db`
 - Chroma persistence: `data/chroma/`
+- Eval set: `eval/eval_set.json`
+- Eval reports: `eval/results/`
 
 ## Current implementation
 
@@ -268,7 +295,8 @@ uv run python -m arxiv_rag.cli inspect --db data/arxiv_rag.db
 - Vector mode relies on Chroma; hybrid mode can fall back to SQLite embeddings if Chroma is missing or empty.
 - `chunk_uid` is now the canonical cross-index join key; chunk backfills keep older rows consistent.
 - Query output supports retrieval-only snippets or `--generate` for cited answers; `--verify` validates citations and quotes.
-- Query logging is still not implemented.
+- Query logging is now stored in the SQLite `query_log` table.
+- Eval utilities include `eval-generate` and `eval-run` for Recall@K/MRR and optional citation accuracy.
 - Spec updates: Phase 3 acceptance criteria now define citation validation, `--verify` behavior, and optional LLM-judge schema.
 
 ## Development notes

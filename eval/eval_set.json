@@ -1,0 +1,1009 @@
+{
+  "eval_set": [
+    {
+      "query_id": "q001",
+      "query": "What is the purpose of the load-balancing loss defined in the excerpt?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "e3ad76ad304d0d7d9a26cbea5604bd27153eeae2"
+        ],
+        "papers": [
+          "1701.06538"
+        ],
+        "pages": [
+          [
+            13
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The load-balancing loss is defined to encourage experts to receive roughly equal numbers of training examples. It uses a smooth estimator to allow backpropagation of gradients through the estimator, addressing the challenge of the discrete nature of the number of examples assigned to each expert."
+    },
+    {
+      "query_id": "q002",
+      "query": "What is the purpose of the margin component added to the binary ranking loss in the training of the reward model?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "90313eb54f4512f380e8b45ca130eb3fd7854fcd"
+        ],
+        "papers": [
+          "2307.09288"
+        ],
+        "pages": [
+          [
+            11
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The margin component is added to improve the accuracy of the Helpfulness reward model, particularly for samples where two responses are more separable. It allows the model to assign more discrepant scores to generations that have more differences, enhancing the learning of human preferences."
+    },
+    {
+      "query_id": "q003",
+      "query": "What is the range of model sizes used in the training runs described in the excerpt?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "ba2a2476d681ebbcafd1c1a8b3f3098e623c0375"
+        ],
+        "papers": [
+          "2203.15556"
+        ],
+        "pages": [
+          [
+            5
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The range of model sizes used in the training runs goes from 70M to over 10B parameters."
+    },
+    {
+      "query_id": "q004",
+      "query": "How does Chinchilla's performance on the LAMBADA dataset compare to Gopher and MT-NLG 530B?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "7d658e8740f9f676ddd167db1a2b5bc8693a0703"
+        ],
+        "papers": [
+          "2203.15556"
+        ],
+        "pages": [
+          [
+            11
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "Chinchilla achieves 77.4% accuracy on the LAMBADA dataset, which is higher than Gopher's 74.5% and MT-NLG 530B's 76.6%."
+    },
+    {
+      "query_id": "q005",
+      "query": "What techniques are used in the safety fine-tuning of Llama 2 models?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "4ed10bd92a2462086376ceeaafb618359106e0c6"
+        ],
+        "papers": [
+          "2307.09288"
+        ],
+        "pages": [
+          [
+            23
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The safety fine-tuning of Llama 2 models includes techniques such as supervised safety fine-tuning, where adversarial prompts and safe demonstrations are gathered and included in the general supervised fine-tuning process. This approach helps the model align with safety guidelines before reinforcement learning from human feedback (RLHF)."
+    },
+    {
+      "query_id": "q006",
+      "query": "What is the focus of the research conducted by Ryan Volum and colleagues in their 2022 paper?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "713a628e988f1e8b6ba5874ef0dab7330adcffe7"
+        ],
+        "papers": [
+          "2305.16291"
+        ],
+        "pages": [
+          [
+            16
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The research focuses on dynamically generating interactive game characters by prompting large language models that are tuned on code."
+    },
+    {
+      "query_id": "q007",
+      "query": "Who are the authors of the paper titled 'Fine-tuning language models from human preferences'?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "87b5595690cb6124dd707e5a3c637a5fab18a35d"
+        ],
+        "papers": [
+          "2005.14165"
+        ],
+        "pages": [
+          [
+            75
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The authors are Daniel M. Ziegler, Nisan Stiennon, Jeffrey Wu, Tom B. Brown, Alec Radford, Dario Amodei, Paul Christiano, and Geoffrey Irving."
+    },
+    {
+      "query_id": "q008",
+      "query": "What is the correct approach to find the longest string from a list of strings when the list is not empty?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "83fec5bd762bab9f160a743e22fcb07a6558ebc9"
+        ],
+        "papers": [
+          "2107.03374"
+        ],
+        "pages": [
+          [
+            23
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The correct approach is to use the max function with the key set to len, which returns the longest string. If the list is empty, the function should return None."
+    },
+    {
+      "query_id": "q009",
+      "query": "What is the purpose of the 'AntiGPT' mode as described in the excerpt?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "066c7824bdea30081062877d8c50383228f0c875"
+        ],
+        "papers": [
+          "2303.08774"
+        ],
+        "pages": [
+          [
+            68
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The purpose of the 'AntiGPT' mode is to generate responses that are the exact opposite of the default answers provided by ChatGPT, even if those responses contradict hardcoded rules. It serves as a mechanism to create contrasting viewpoints in response to user prompts."
+    },
+    {
+      "query_id": "q010",
+      "query": "What evaluation metrics are used for assessing the sample quality of Text-to-Image models in the study?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "c03965738b84f3c393aeb86b05f9e4f685043b55"
+        ],
+        "papers": [
+          "2112.10752"
+        ],
+        "pages": [
+          [
+            27
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The evaluation metrics used for assessing the sample quality of Text-to-Image models are FID (Fr\u00e9chet Inception Distance) and Inception Score, computed by comparing generated samples with 30,000 samples from the validation set of the MS-COCO dataset."
+    },
+    {
+      "query_id": "q011",
+      "query": "How does retrieval enhancement benefit smaller models compared to large-scale language models?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "01f0ca129bf723228faf95c09c64310dd132b066"
+        ],
+        "papers": [
+          "2305.14283"
+        ],
+        "pages": [
+          [
+            2
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "Retrieval enhancement can compensate for the shortfall in parameter size of smaller models, allowing them to achieve performance levels comparable to much larger models. For instance, the Atlas model, which is 50 times smaller than the 540B PalM, demonstrates few-shot performance on par with it by jointly training the retriever and the reader."
+    },
+    {
+      "query_id": "q012",
+      "query": "Who are the authors of the paper discussing a unified view of parameter-efficient transfer learning presented at ICLR 2022?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "bb82e8bc64d010c35a03c6fad597e74361b24cbb"
+        ],
+        "papers": [
+          "2404.03592"
+        ],
+        "pages": [
+          [
+            13
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The authors are Junxian He, Chunting Zhou, Xuezhe Ma, Taylor Berg-Kirkpatrick, and Graham Neubig."
+    },
+    {
+      "query_id": "q013",
+      "query": "How does the performance of DeepSeekMoE 16B compare to DeepSeek 7B (Dense) across different training tokens in the GSM8K dataset?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "03e5375f3b7cd7973232ff47a48b7003fe827519"
+        ],
+        "papers": [
+          "2401.06066"
+        ],
+        "pages": [
+          [
+            33
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The performance of DeepSeekMoE 16B improves with an increase in training tokens, showing better results compared to DeepSeek 7B (Dense) across the GSM8K dataset. Specifically, as the number of training tokens increases, DeepSeekMoE consistently outperforms DeepSeek 7B in terms of exact match (EM)."
+    },
+    {
+      "query_id": "q014",
+      "query": "What are the performance characteristics of the multilingual models LaBSE, LASER2, MPNet, MiniLM, and SGPT-BLOOM-7B1-msmarco in the context of bitext mining and classification tasks?",
+      "difficulty": "synthesis",
+      "ground_truth": {
+        "chunk_uids": [
+          "2d2cf5a9b71d64498749a94cc3372f9bbb2ebed3"
+        ],
+        "papers": [
+          "2210.07316"
+        ],
+        "pages": [
+          [
+            9
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "LaBSE performs strongly across a wide array of languages in bitext mining, while LASER2 shows high variance in performance. In classification and STS tasks, multilingual MPNet provides the overall strongest performance, outperforming MiniLM, while SGPT-BLOOM-7B1-msmarco excels in specific languages like Hindi and Portuguese but is not significantly better than MPNet."
+    },
+    {
+      "query_id": "q015",
+      "query": "What is the focus of the research conducted by Stroud et al. in their 2020 paper?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "c866006632216c0beea248b7d7844ada70b6c4d9"
+        ],
+        "papers": [
+          "2103.00020"
+        ],
+        "pages": [
+          [
+            34
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "Stroud et al. focus on learning video representations from textual web supervision in their 2020 paper."
+    },
+    {
+      "query_id": "q016",
+      "query": "Who are the authors of the paper titled 'Stanford Alpaca: An instruction-following LLaMA model'?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "4e01fb0ba2e55597f19d11af4046bc35bcdcd3cd"
+        ],
+        "papers": [
+          "2404.03592"
+        ],
+        "pages": [
+          [
+            16
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The authors of the paper are Rohan Taori, Ishaan Gulrajani, Tianyi Zhang, Yann Dubois, Xuechen Li, Carlos Guestrin, Percy Liang, and Tatsunori B. Hashimoto."
+    },
+    {
+      "query_id": "q017",
+      "query": "What is the effect of using different levels of noise augmentation (aug_level) on the FID scores of the 64\u00d764 \u2192 256\u00d7256 super-resolution model?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "50685f2435e5938980dfc4a739ccdff51e3598f3"
+        ],
+        "papers": [
+          "2205.11487"
+        ],
+        "pages": [
+          [
+            23
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The best FID score is achieved with aug_level = 0 for all guidance weights. While increasing aug_level generally leads to worse FID scores, it allows for a more varied range of CLIP scores, indicating more diverse generations by the super-resolution model."
+    },
+    {
+      "query_id": "q018",
+      "query": "What is the accuracy of Chinchilla in the task of understanding fables according to the BIG-bench results?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "69d845a2fb1da0b7d06ec2d4ceacc609e151ec86"
+        ],
+        "papers": [
+          "2203.15556"
+        ],
+        "pages": [
+          [
+            35
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "Chinchilla achieved an accuracy of 60.3 in the task of understanding fables."
+    },
+    {
+      "query_id": "q019",
+      "query": "What are the performance metrics for the visual models with different configurations as presented in the excerpt?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "a8d1a01e869bbc10fe2ed07c7e059a83ca7e162f"
+        ],
+        "papers": [
+          "2103.00020"
+        ],
+        "pages": [
+          [
+            40
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The excerpt lists performance metrics for various configurations of visual models, including values such as 94.7, 97.9, and 98.5 for the 32x8d configuration, and similar metrics for 32x16d, 32x32d, and 32x48d configurations, indicating their respective performance levels."
+    },
+    {
+      "query_id": "q020",
+      "query": "What is the accuracy of the GPT-4o model on the MMLU benchmark?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "40afd15318d36a7f0f1f87508f3738c0f246a2e0"
+        ],
+        "papers": [
+          "2406.01574"
+        ],
+        "pages": [
+          [
+            8
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The accuracy of the GPT-4o model on the MMLU benchmark is 88.7%."
+    },
+    {
+      "query_id": "q021",
+      "query": "What geometric shape is formed by the lines created from the points specified in the excerpt?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "8536894935d109c81a7497a6c1e493c1f34e9001"
+        ],
+        "papers": [
+          "2210.09261"
+        ],
+        "pages": [
+          [
+            30
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The lines create a five-sided shape, which is a pentagon. It is the only five-sided polygon mentioned in the excerpt."
+    },
+    {
+      "query_id": "q022",
+      "query": "What are the nine visual patterns identified in the MMVP-VLM benchmark that the CLIP vision encoders might consistently misinterpret?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "970728f8d4add1cf9fb82951648e011348277a20"
+        ],
+        "papers": [
+          "2401.06209"
+        ],
+        "pages": [
+          [
+            5
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The nine visual patterns identified are Orientation and Direction, Presence of Specific Features, State and Condition, Quantity and Count, Positional and Relational Context, Color and Appearance, Structural Characteristics, Texts, and Viewpoint and Perspective."
+    },
+    {
+      "query_id": "q023",
+      "query": "What types of images are included in the samples generated by the Imagen model as described in the excerpt?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "1df298b1cd0acf099a0646592ceb0f5ad51e2316"
+        ],
+        "papers": [
+          "2205.11487"
+        ],
+        "pages": [
+          [
+            2
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The samples include photorealistic images such as a Shiba Inu dog riding a bike, a happy panda chef in a kitchen, teddy bears swimming, and various whimsical scenes like a corgi house made of sushi and a brain riding a rocketship. Artistic content is excluded from this figure."
+    },
+    {
+      "query_id": "q024",
+      "query": "What are the main challenges faced when scaling up the training of the DeepSeek-R1 model using MCTS and a value model?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "4810161c1705b5981e1cc4b537c2d0c19415ff0c"
+        ],
+        "papers": [
+          "2501.12948"
+        ],
+        "pages": [
+          [
+            64
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The main challenges include the exponentially larger search space of token generation compared to well-defined games like chess, which can lead to the model getting stuck in local optima. Additionally, training a fine-grained value model is difficult, impacting the model's ability to iteratively improve its performance."
+    },
+    {
+      "query_id": "q025",
+      "query": "How does the scaling of data and tasks affect the volume of representations in the optimization process?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "74ec8ac1d9d090798c3e437da511687e9ab05b48"
+        ],
+        "papers": [
+          "2405.07987"
+        ],
+        "pages": [
+          [
+            5
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "As data and tasks scale, the volume of representations that satisfy the constraints imposed by each training datapoint and objective must proportionately grow smaller."
+    },
+    {
+      "query_id": "q026",
+      "query": "How does the early-stopped test loss L(N, D) relate to dataset size D and model size N?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "cd02cd1266ba3895b6d8b7664a494f2b5cba9f6a"
+        ],
+        "papers": [
+          "2001.08361"
+        ],
+        "pages": [
+          [
+            11
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The early-stopped test loss L(N, D) depends predictably on dataset size D and model size N, showing a power law relationship for large D. However, with a fixed finite D, performance ceases to improve as N increases, leading to overfitting."
+    },
+    {
+      "query_id": "q027",
+      "query": "What training strategy is applied to Codex in relation to the GPT model?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "4ccb48f1314398d2913e5465468c24c5ea6f98c7"
+        ],
+        "papers": [
+          "2107.03374"
+        ],
+        "pages": [
+          [
+            4
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "Codex is trained using the same learning rate as the corresponding GPT model, with a 175 step linear warmup and cosine learning rate decay, for a total of 100 billion tokens."
+    },
+    {
+      "query_id": "q028",
+      "query": "What categories are included in the taxonomy of in-house safety benchmarks as presented in the excerpt?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "892d6423b496acc00adcecacb3d6a9eb321e3125"
+        ],
+        "papers": [
+          "2501.12948"
+        ],
+        "pages": [
+          [
+            49
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The taxonomy includes categories such as Discrimination and Prejudice Issues, Harmful Behavior, Illegal and Criminal Behavior, and various forms of discrimination like Gender and Sexual Discrimination, Ethnic and Racial Discrimination, and Religious Discrimination, among others."
+    },
+    {
+      "query_id": "q029",
+      "query": "What metric is used to measure the average overlap of nearest neighbor sets between two models in the Platonic Representation Hypothesis?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "f613ee2b26ad96634fa505a0fb7150b1dca9a142"
+        ],
+        "papers": [
+          "2405.07987"
+        ],
+        "pages": [
+          [
+            18
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The mutual k-nearest neighbor metric, referred to as mNN, is used to measure the average overlap of nearest neighbor sets between two models with representations f and g."
+    },
+    {
+      "query_id": "q030",
+      "query": "What modifications were made to the 'fit' method in the 'huber.py' file of the sklearn linear_model module?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "385dcd91eb240b89ff73e21245c97971f77bb8e3"
+        ],
+        "papers": [
+          "2310.06770"
+        ],
+        "pages": [
+          [
+            33
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The modifications include adding a new parameter 'dtype' with values [np.float64, np.float32] to the check_X_y function call. Additionally, there is an extra line break before this parameter, which is a formatting change."
+    },
+    {
+      "query_id": "q031",
+      "query": "How does the Mini Crosswords approach utilize depth-first search (DFS) for proposing and evaluating thoughts?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "77cd9cfc0324317b0be04fe4485d3d856f79f2cb"
+        ],
+        "papers": [
+          "2305.10601"
+        ],
+        "pages": [
+          [
+            8
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "In Mini Crosswords, thoughts are proposed and aggregated in a priority queue for depth-first search (DFS). Each state is evaluated based on the possibility of filling in remaining word clues, and if any clue is deemed impossible to fill, the state\u2019s subtree is pruned, allowing DFS to backtrack to explore the next promising thought."
+    },
+    {
+      "query_id": "q032",
+      "query": "What types of file extensions are mentioned in the excerpt from the research paper?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "6a850e0145426a786b2ad188c9b644ea7e63a1d9"
+        ],
+        "papers": [
+          "2211.15533"
+        ],
+        "pages": [
+          [
+            27
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The excerpt lists a variety of file extensions including .html, .rmd, .rb, .sql, .bash, .swift, and many others, indicating a diverse range of programming and markup languages."
+    },
+    {
+      "query_id": "q033",
+      "query": "What is the title of the paper authored by Zijian Wang and Christopher Potts that focuses on condescension detection?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "47b72d221519a3c7f44abf68fcb29bddf7b077e8"
+        ],
+        "papers": [
+          "2206.04615"
+        ],
+        "pages": [
+          [
+            91
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The title of the paper is 'TalkDown: A corpus for condescension detection in context.'"
+    },
+    {
+      "query_id": "q034",
+      "query": "How does ReAct differ from WebGPT in terms of modeling reasoning procedures?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "fd501d2aab00ca997e044014fe077c532d0ffa59"
+        ],
+        "papers": [
+          "2210.03629"
+        ],
+        "pages": [
+          [
+            9
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "ReAct explicitly models the thinking and reasoning procedure, while WebGPT does not and instead relies on expensive human feedback for reinforcement learning. This allows ReAct to learn a decision-making policy in a more cost-effective manner using language descriptions of reasoning."
+    },
+    {
+      "query_id": "q035",
+      "query": "What are the four steps involved in the evaluation procedure for the SWE-bench tasks as described in the excerpt?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "787acc6c3c7377378591b0ce4963d18b32a415d0"
+        ],
+        "papers": [
+          "2310.06770"
+        ],
+        "pages": [
+          [
+            20
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The four steps in the evaluation procedure are: 1) providing the codebase and problem statement, 2) generating a model prediction patch, 3) applying the patch, and 4) logging the results to verify task completion."
+    },
+    {
+      "query_id": "q036",
+      "query": "What is the main difference between ReAct and other reasoning methods like Chain-of-Thought and Selection-Inference?",
+      "difficulty": "synthesis",
+      "ground_truth": {
+        "chunk_uids": [
+          "cfc61af8c64db594b0c8a440e91fb46f4c2da677"
+        ],
+        "papers": [
+          "2210.03629"
+        ],
+        "pages": [
+          [
+            9
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "ReAct integrates model actions and their corresponding observations into a coherent stream of inputs, allowing for more accurate reasoning and the ability to tackle tasks beyond just reasoning, such as interactive decision making. In contrast, other methods focus on isolated reasoning processes."
+    },
+    {
+      "query_id": "q037",
+      "query": "What are the accuracy scores for the ANLI R1, R2, and R3 tests as presented in the excerpt?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "b8be03bb7611b6cdba1f9d8dc2e9d5594e4df0c7"
+        ],
+        "papers": [
+          "2005.14165"
+        ],
+        "pages": [
+          [
+            63
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The accuracy scores for the ANLI tests are as follows: ANLI R1 has a score of 73.8, ANLI R2 has a score of 50.7, and ANLI R3 has a score of 48.3."
+    },
+    {
+      "query_id": "q038",
+      "query": "What types of evaluation methods are mentioned in the excerpt for assessing models like GPT-4 and ChatGPT?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "ce46c1910970855f58c868d762555ed8904f0b79"
+        ],
+        "papers": [
+          "2406.06608"
+        ],
+        "pages": [
+          [
+            71
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The excerpt mentions evaluation methods such as Likert scales (ranging from 1-5 or 1-10) and pairwise comparisons. These methods are used to assess the models explicitly or implicitly based on their outputs."
+    },
+    {
+      "query_id": "q039",
+      "query": "What is the title of the paper authored by Chambers and Jurafsky?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "51f99c452e826f99717c363b82dff778426130d9"
+        ],
+        "papers": [
+          "2405.07987"
+        ],
+        "pages": [
+          [
+            12
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The title of the paper authored by Chambers and Jurafsky is 'Unsupervised learning of narrative event chains.'"
+    },
+    {
+      "query_id": "q040",
+      "query": "Who are some of the contributors listed in the excerpt of the paper titled 'The Llama 3 Herd of Models'?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "5d2c674074fc38be92d6b3a28884e25a92ea9111"
+        ],
+        "papers": [
+          "2407.21783"
+        ],
+        "pages": [
+          [
+            72
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The excerpt lists several contributors including Ind Thattai, Graeme Nail, Gregoire Mialon, Guan Pang, and many others."
+    },
+    {
+      "query_id": "q041",
+      "query": "What are the Elo ratings for the various models listed in the excerpt?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "274e2e44504e3ec4d6432498456c2573a8e22578"
+        ],
+        "papers": [
+          "2408.07009"
+        ],
+        "pages": [
+          [
+            27
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The Elo ratings for the models listed include values such as 850, 900, 950, 1,000, 1,050, and up to 1,106, with specific ratings for models like Imagen 3-001, DALL\u00b7E 3, and others provided in the data."
+    },
+    {
+      "query_id": "q042",
+      "query": "What are the main sections outlined in the contents of the paper 'DeepSeek LLM: Scaling Open-Source Language Models with Longtermism'?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "f63cfb6aa9278702ffb7325a21411027fff542a6"
+        ],
+        "papers": [
+          "2401.02954"
+        ],
+        "pages": [
+          [
+            2
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The main sections outlined in the contents include Introduction, Pre-Training, Scaling Laws, Alignment, and Evaluation."
+    },
+    {
+      "query_id": "q043",
+      "query": "What are the empirical fitted values for the power law trends related to parameters, data, compute, and batch size in the study?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "aa4679b0c26b261ad4a2f5a4d172f37d46a978e3"
+        ],
+        "papers": [
+          "2001.08361"
+        ],
+        "pages": [
+          [
+            20
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The empirical fitted values for the power law trends are: \u03b1N = 0.076 with Nc = 8.8 \u00d7 10^13 params, \u03b1D = 0.095 with Dc = 5.4 \u00d7 10^13 tokens, \u03b1C = 0.057 with Cc = 1.6 \u00d7 10^7 PF-days, \u03b1minC = 0.050 with Cmin = 3.1 \u00d7 10^8 PF-days, \u03b1B = 0.21 with B* = 2.1 \u00d7 10^8 tokens, and \u03b1S = 0.76 with Sc = 2.1 \u00d7 10^3 steps."
+    },
+    {
+      "query_id": "q044",
+      "query": "How does the performance of zero-shot CLIP compare to a fully supervised linear classifier on various datasets?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "c7c55716ec52a9d39d7c55da29bd66bcb62adb8d"
+        ],
+        "papers": [
+          "2103.00020"
+        ],
+        "pages": [
+          [
+            8
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "Zero-shot CLIP outperforms a fully supervised linear classifier fitted on ResNet-50 features on 16 out of 27 datasets, showing competitive performance overall. It achieves significant advantages on fine-grained classification tasks like Stanford Cars and Food101, while underperforming on others like Flowers102 and FGVCAircraft."
+    },
+    {
+      "query_id": "q045",
+      "query": "What is the percentage representation of the Sinhalese language in the data provided?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "f0a26d1eea2a91c8431dd77e8ce3e3a65ce5f7a1"
+        ],
+        "papers": [
+          "2204.02311"
+        ],
+        "pages": [
+          [
+            73
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The percentage representation of the Sinhalese language is 0.065%."
+    },
+    {
+      "query_id": "q046",
+      "query": "What is the procedure used to train a deep bidirectional representation in the masked language model (MLM) task?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "0dd37d46cb3e7d581051f591996982a58afafd5c"
+        ],
+        "papers": [
+          "1810.04805"
+        ],
+        "pages": [
+          [
+            4
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The procedure involves masking 15% of the input tokens at random and then predicting those masked tokens. This is done by replacing the masked tokens with the [MASK] token 80% of the time, a random token 10% of the time, and leaving the original token unchanged 10% of the time."
+    },
+    {
+      "query_id": "q047",
+      "query": "What is the role of prompt engineering in the context of large language models (LLMs) as discussed in the paper?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "f5fbb6afd288cd7acd003551e848b4c422c86f98"
+        ],
+        "papers": [
+          "2211.01910"
+        ],
+        "pages": [
+          [
+            3
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "Prompt engineering serves as a natural and intuitive interface for humans to interact with LLMs, allowing for flexible use in various NLP tasks. It requires careful design, either manually or automatically, since LLMs do not interpret prompts in the same way humans do."
+    },
+    {
+      "query_id": "q048",
+      "query": "What are the characteristics of masks that receive medium-to-high scores in the evaluation of object segmentation?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "f98e81ec257030d0eb08de1bd23d5b1466e4efed"
+        ],
+        "papers": [
+          "2304.02643"
+        ],
+        "pages": [
+          [
+            30
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "Masks with medium-to-high scores (6-8) typically have small regions of poor boundary definition, such as splotchy pixels or disconnected parts. For example, a mask may show issues at the top and bottom right, or have stray pixels that do not accurately represent the object."
+    },
+    {
+      "query_id": "q049",
+      "query": "What preprocessing steps were taken for the dataset used in SAM 2?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "3b35e5349bbc7028c48197ca840b0af64f464932"
+        ],
+        "papers": [
+          "2408.00714"
+        ],
+        "pages": [
+          [
+            34
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The videos were re-sampled to 24 fps and converted to mp4 format."
+    },
+    {
+      "query_id": "q050",
+      "query": "What were the F1 scores for BERTLARGE (Ensemble) on the SQuAD 1.1 test set?",
+      "difficulty": "factual",
+      "ground_truth": {
+        "chunk_uids": [
+          "99f6b1104324f9405ca69249cc312f4190fac0ac"
+        ],
+        "papers": [
+          "1810.04805"
+        ],
+        "pages": [
+          [
+            7
+          ]
+        ],
+        "expected_topics": []
+      },
+      "reference_answer": "The F1 score for BERTLARGE (Ensemble) on the SQuAD 1.1 test set was 91.8."
+    }
+  ],
+  "metadata": {
+    "created": "2026-02-04",
+    "corpus_version": "v1",
+    "n_queries": 50
+  }
+}

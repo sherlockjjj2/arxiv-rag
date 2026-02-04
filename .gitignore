@@ -26,6 +26,9 @@ build/
 
 # Editors/IDE
 .vscode/
+
+# Eval Result
+eval/results/
 .idea/
 
 # OS trash
