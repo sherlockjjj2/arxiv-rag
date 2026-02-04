@@ -548,17 +548,22 @@ arxiv-rag query "How does RAG handle hallucination?" \
 # Sources only (no generation)
 arxiv-rag sources "contrastive learning for embeddings" --top-k 5
 
-# Verify mode: show chunks + open PDF
-arxiv-rag query "How does vector search work?" --verify
+# Verify mode (requires generation)
+arxiv-rag query "How does vector search work?" --generate --verify
 
 # Index management
-arxiv-rag index --papers ./papers/ --rebuild
-arxiv-rag index --add-ids 2312.10997 2401.00001
+arxiv-rag index --rebuild --pdf-dir data/arxiv-papers
+arxiv-rag index --add-ids data/paper_ids.txt
 
-# Stats
-arxiv-rag stats
-# Output: 200 papers, 15,234 chunks, index size: 45MB
+# Corpus stats (SQLite one-liner; no dedicated stats command yet)
+sqlite3 data/arxiv_rag.db "SELECT COUNT(*) AS papers FROM papers; SELECT COUNT(*) AS chunks FROM chunks;"
 ```
+
+Exit codes used by CLI commands:
+
+- `0`: success
+- `1`: user/input/config error (invalid flags, missing files, validation failure)
+- `2`: system/runtime error (SQLite, API, dependency/runtime failures)
 
 ### CLI Implementation Sketch
 
@@ -879,10 +884,10 @@ def evaluate(eval_set: list[dict]) -> dict:
 **Goal**: 200 papers, robust CLI
 
 - [ ] Scale to 200 papers
-- [ ] Error handling (bad PDFs, API failures)
-- [ ] Progress bars and better UX
-- [ ] `--add-ids` and `--rebuild` commands
-- [ ] README and usage docs
+- [x] Error handling (bad PDFs, API failures)
+- [x] Progress bars and better UX
+- [x] `--add-ids` and `--rebuild` commands
+- [x] README and usage docs
 
 **Deliverable**: Shareable tool you can demo
 
@@ -895,11 +900,10 @@ arxiv-rag/
 ├── arxiv_rag/
 │   ├── __init__.py
 │   ├── cli.py              # Typer CLI
-│   ├── config.py           # Settings, API keys
 │   ├── download.py         # arXiv fetching
 │   ├── parse.py            # PDF extraction
 │   ├── chunk.py            # Chunking logic
-│   ├── index.py            # SQLite + ChromaDB
+│   ├── indexer.py          # SQLite + ChromaDB indexing
 │   ├── retrieve.py         # Hybrid search
 │   ├── generate.py         # Answer generation
 │   └── evaluate.py         # Eval metrics
@@ -925,20 +929,23 @@ arxiv-rag/
 [project]
 name = "arxiv-rag"
 version = "0.1.0"
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 
 dependencies = [
-    "arxiv>=2.0",           # arXiv API
-    "pymupdf>=1.23",        # PDF extraction
-    "openai>=1.0",          # Embeddings + generation
-    "chromadb>=0.4",        # Vector store
-    "tiktoken>=0.5",        # Token counting
-    "typer>=0.9",           # CLI
-    "rich>=13.0",           # Pretty output
+    "arxiv>=2.1.0",
+    "httpx[socks]>=0.28.1",
+    "openai>=1.58.1",
+    "pymupdf>=1.23",
+    "python-dotenv>=1.0.1",
+    "requests>=2.32.5",
+    "rich>=14.3.2",
+    "tenacity>=8.2.3",
+    "tiktoken>=0.11.0",
+    "typer>=0.12.3",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff", "mypy"]
+vector = ["chromadb>=0.5.0; python_version < '3.14'"]
 ```
 
 ---

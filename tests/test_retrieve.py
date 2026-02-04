@@ -196,3 +196,35 @@ def test_query_cli_handles_missing_db_without_traceback(tmp_path: Path) -> None:
     assert "Database not found" in result.output
     assert "Traceback" not in result.output
     assert isinstance(result.exception, SystemExit)
+
+
+def test_query_cli_maps_import_error_to_exit_code_2(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    db_path = tmp_path / "arxiv_rag.db"
+    _create_fts_db(db_path)
+    cli = _load_cli_module()
+    runner = CliRunner()
+
+    def _raise_import_error(*_args, **_kwargs):
+        raise ImportError("chroma unavailable")
+
+    monkeypatch.setattr(cli, "search_vector_chroma", _raise_import_error)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "query",
+            "dense retrieval",
+            "--mode",
+            "vector",
+            "--db",
+            str(db_path),
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "chroma unavailable" in result.output
+    assert "Traceback" not in result.output
+    assert isinstance(result.exception, SystemExit)
