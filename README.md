@@ -30,6 +30,8 @@ uv sync --extra vector
 
 Note: Chroma depends on `onnxruntime` wheels; Python 3.13 is recommended (3.14 may not be supported yet).
 
+Set `OPENAI_API_KEY` (for example in `.env`) before running OpenAI-backed commands (`embed`, `index`, `query --mode vector|hybrid`, `query --generate`, `eval-generate`, `eval-run --generate`).
+
 ## Quickstart
 
 1. Search arXiv for IDs (no downloads):
@@ -67,6 +69,8 @@ uv run python arxiv_rag/chunk.py --parsed data/parsed/2301.12345v1.json --db dat
 ```bash
 uv run python -m arxiv_rag.cli index --db data/arxiv_rag.db
 ```
+
+Requires `uv sync --extra vector` and `OPENAI_API_KEY`.
 
 6. Query the BM25 index:
 
