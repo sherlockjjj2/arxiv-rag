@@ -254,18 +254,27 @@ def _run_retrieval(
             rrf_weight_fts=rrf_weight_fts,
             rrf_weight_vector=rrf_weight_vector,
         )
-    except FileNotFoundError as exc:
+    except (FileNotFoundError, ValueError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
-    except ValueError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(code=1) from exc
-    except ImportError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(code=1) from exc
-    except sqlite3.Error as exc:
-        typer.echo(f"SQLite error: {exc}", err=True)
+    except (ImportError, OSError, sqlite3.Error) as exc:
+        if isinstance(exc, sqlite3.Error):
+            typer.echo(f"SQLite error: {exc}", err=True)
+        else:
+            typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc
+
+
+def _exit_code_from_typer_exit(exc: typer.Exit) -> int | None:
+    """Return a normalized exit code from a Typer/Click Exit exception."""
+
+    exit_code = getattr(exc, "exit_code", None)
+    if isinstance(exit_code, int):
+        return exit_code
+    code = getattr(exc, "code", None)
+    if isinstance(code, int):
+        return code
+    return None
 
 
 def _safe_log_query(db: Path, entry: QueryLogEntry) -> None:
@@ -862,7 +871,8 @@ def query(
             rrf_weight_vector=rrf_weight_vector,
         )
     except typer.Exit as exc:
-        if log_queries and (exc.code == 0 or exc.code is None):
+        exit_code = _exit_code_from_typer_exit(exc)
+        if log_queries and (exit_code == 0 or exit_code is None):
             latency_ms = int((time.perf_counter() - start_time) * 1000)
             _safe_log_query(
                 db,
