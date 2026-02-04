@@ -1128,6 +1128,10 @@ def eval_run(
         5,
         help="Number of chunks to pass into generation.",
     ),
+    generation_concurrency: int = typer.Option(
+        4,
+        help="Maximum concurrent generation calls when --generate is enabled.",
+    ),
     cache_db: Path = typer.Option(
         Path("eval/cache/eval_cache.db"),
         help="SQLite cache path for eval embeddings and generated answers.",
@@ -1180,6 +1184,7 @@ def eval_run(
             generate=generate,
             generate_model=generate_model,
             generation_top_k=effective_generation_top_k,
+            generation_concurrency=generation_concurrency,
             cache_db_path=None if disable_cache else cache_db,
         )
     except (FileNotFoundError, ValueError) as exc:
