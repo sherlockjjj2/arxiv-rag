@@ -117,3 +117,53 @@ def test_index_command_uses_add_ids_ingest_flow(
 
     assert result.exit_code == 0
     assert calls["add_ids"] == ids_path
+
+
+def test_index_command_suppresses_arxiv_info_logs(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    cli = _load_cli_module()
+    ids_path = tmp_path / "ids.txt"
+    ids_path.write_text("2312.10997\n", encoding="utf-8")
+
+    arxiv_logger = cli.logging.getLogger("arxiv")
+    original_level = arxiv_logger.level
+    arxiv_logger.setLevel(cli.logging.INFO)
+
+    def fake_run_ingest_and_index(**_kwargs):
+        return cli.IngestSummary(
+            requested_count=1,
+            parsed_count=1,
+            chunked_count=1,
+            indexed_chunks=10,
+            failures=[],
+            warnings=[],
+        )
+
+    monkeypatch.setattr(cli, "_run_ingest_and_index", fake_run_ingest_and_index)
+    monkeypatch.setattr(cli, "_print_ingest_summary", lambda _summary: None)
+
+    runner = CliRunner()
+    try:
+        result = runner.invoke(
+            cli.app,
+            [
+                "index",
+                "--add-ids",
+                str(ids_path),
+                "--db",
+                str(tmp_path / "arxiv_rag.db"),
+                "--pdf-dir",
+                str(tmp_path / "arxiv-papers"),
+                "--parsed-dir",
+                str(tmp_path / "parsed"),
+                "--chroma-dir",
+                str(tmp_path / "chroma"),
+                "--no-progress",
+            ],
+        )
+        assert result.exit_code == 0
+        assert arxiv_logger.level == cli.logging.WARNING
+    finally:
+        arxiv_logger.setLevel(original_level)

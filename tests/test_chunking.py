@@ -86,6 +86,29 @@ def test_chunk_page_skips_empty_text():
     assert chunks == []
 
 
+def test_chunk_page_preserves_multibyte_symbols():
+    chunk = _load_chunk_module()
+    encoder = chunk.get_encoding("cl100k_base")
+    text = "texts CF ⊂C, where |CF| = k ≪|C|. For a ﬁxed k"
+
+    config = chunk.ChunkConfig(target_tokens=5, overlap_tokens=1)
+    chunks = chunk.chunk_page(
+        page_text=text,
+        page_num=1,
+        paper_id="2501.12345",
+        doc_id="doc1",
+        config=config,
+        encoder=encoder,
+    )
+
+    assert chunks
+    assert all("\ufffd" not in record.text for record in chunks)
+    combined = " ".join(record.text for record in chunks)
+    assert "⊂" in combined
+    assert "≪" in combined
+    assert "ﬁ" in combined
+
+
 def test_chunk_page_rejects_invalid_config():
     chunk = _load_chunk_module()
     encoder = chunk.get_encoding("cl100k_base")

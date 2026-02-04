@@ -5,15 +5,24 @@ import hashlib
 import json
 import logging
 import math
+import os
 import re
 import sys
 from collections import Counter
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator
 
 import fitz
 
 LOGGER = logging.getLogger(__name__)
 _SHA1_CHUNK_SIZE = 1024 * 1024
+_LOW_RISK_MUPDF_WARNING_PATTERNS = (
+    "bogus font ascent/descent values",
+    "invalid marked content and clip nesting",
+    "could not parse color space",
+    "ignoring page blending colorspace",
+)
 
 
 def _compute_sha1(pdf_path: Path) -> str:
@@ -73,6 +82,93 @@ def _remove_repeated_lines(pages: list[dict], repeated_lines: set[str]) -> int:
     return removed
 
 
+@contextmanager
+def _mute_stderr_fd() -> Iterator[None]:
+    """Temporarily redirect process-level stderr to os.devnull.
+
+    Some MuPDF parser diagnostics bypass Python logging and write directly to
+    file descriptor 2. Redirecting stderr at the descriptor level suppresses
+    those low-level messages while parsing.
+    """
+
+    try:
+        devnull_fd = os.open(os.devnull, os.O_WRONLY)
+        saved_stderr_fd = os.dup(2)
+    except OSError:
+        yield
+        return
+
+    try:
+        os.dup2(devnull_fd, 2)
+        yield
+    finally:
+        try:
+            os.dup2(saved_stderr_fd, 2)
+        finally:
+            os.close(saved_stderr_fd)
+            os.close(devnull_fd)
+
+
+@contextmanager
+def _mute_mupdf_diagnostics() -> Iterator[None]:
+    """Temporarily silence MuPDF stderr diagnostics during extraction.
+
+    PyMuPDF can emit parser diagnostics directly to stderr for malformed-but-readable
+    PDFs. This context manager keeps CLI progress output readable while preserving
+    explicit Python-level exceptions and warnings.
+    """
+
+    previous_error_display = bool(fitz.TOOLS.mupdf_display_errors())
+    previous_warning_display = bool(fitz.TOOLS.mupdf_display_warnings())
+    fitz.TOOLS.mupdf_display_errors(False)
+    fitz.TOOLS.mupdf_display_warnings(False)
+    fitz.TOOLS.reset_mupdf_warnings()
+    try:
+        with _mute_stderr_fd():
+            yield
+    finally:
+        fitz.TOOLS.mupdf_display_errors(previous_error_display)
+        fitz.TOOLS.mupdf_display_warnings(previous_warning_display)
+
+
+def _summarize_mupdf_warnings() -> str | None:
+    """Return a compact summary of high-risk MuPDF warnings, if any."""
+
+    warning_blob = fitz.TOOLS.mupdf_warnings()
+    if not warning_blob:
+        return None
+
+    lines = [line.strip() for line in warning_blob.splitlines() if line.strip()]
+    if not lines:
+        return None
+
+    filtered_lines = [line for line in lines if not _is_low_risk_mupdf_warning(line)]
+    if not filtered_lines:
+        return None
+
+    preview_count = min(3, len(filtered_lines))
+    preview = "; ".join(filtered_lines[:preview_count])
+    if len(filtered_lines) == preview_count:
+        return f"MuPDF warnings: {preview}"
+    return (
+        f"MuPDF warnings: {preview} "
+        f"(+{len(filtered_lines) - preview_count} more)"
+    )
+
+
+def _is_low_risk_mupdf_warning(line: str) -> bool:
+    """Return True when a MuPDF warning line matches low-risk parser noise.
+
+    Low-risk warnings are typically font metadata or graphics-structure issues
+    that do not indicate severe text extraction failures.
+    """
+
+    normalized = line.strip().casefold()
+    return any(
+        pattern in normalized for pattern in _LOW_RISK_MUPDF_WARNING_PATTERNS
+    )
+
+
 def _parse_pdf_with_warnings(
     pdf_path: Path, *, remove_headers_footers: bool
 ) -> tuple[dict, list[str]]:
@@ -98,23 +194,27 @@ def _parse_pdf_with_warnings(
     doc_id = _compute_sha1(pdf_path)
 
     try:
-        with fitz.open(pdf_path) as doc:
-            num_pages = doc.page_count
-            pages: list[dict] = []
-            for page_index in range(num_pages):
-                page_number = page_index + 1
-                try:
-                    page = doc.load_page(page_index)
-                    text = page.get_text("text")
-                except Exception as exc:  # pragma: no cover - PyMuPDF error types vary
-                    warning = f"Skipped page {page_number}: {exc}"
-                    warnings.append(warning)
-                    LOGGER.warning(warning)
-                    continue
-                cleaned = _clean_text(text)
-                pages.append({"page": page_number, "text": cleaned})
+        with _mute_mupdf_diagnostics():
+            with fitz.open(pdf_path) as doc:
+                num_pages = doc.page_count
+                pages: list[dict] = []
+                for page_index in range(num_pages):
+                    page_number = page_index + 1
+                    try:
+                        page = doc.load_page(page_index)
+                        text = page.get_text("text")
+                    except Exception as exc:  # pragma: no cover - PyMuPDF error types vary
+                        warning = f"Skipped page {page_number}: {exc}"
+                        warnings.append(warning)
+                        LOGGER.warning(warning)
+                        continue
+                    cleaned = _clean_text(text)
+                    pages.append({"page": page_number, "text": cleaned})
     except Exception as exc:  # pragma: no cover - PyMuPDF error types vary
         raise ValueError(f"Failed to read PDF: {pdf_path}") from exc
+
+    if warning_summary := _summarize_mupdf_warnings():
+        warnings.append(warning_summary)
 
     if remove_headers_footers and pages:
         if repeated := _find_repeated_headers_footers(pages):
