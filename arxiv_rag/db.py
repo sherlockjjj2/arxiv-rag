@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from array import array
+from dataclasses import dataclass
 from math import sqrt
 from pathlib import Path
 from typing import Sequence
@@ -74,6 +76,91 @@ CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE OF text ON chunks BEGIN
     INSERT INTO chunks_fts(rowid, text) VALUES (new.chunk_id, new.text);
 END;
 """
+
+_QUERY_LOG_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS query_log (
+    query_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    query_text TEXT NOT NULL,
+    timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+    retrieved_chunks TEXT,
+    answer TEXT,
+    latency_ms INTEGER,
+    model TEXT,
+    feedback INTEGER
+);
+"""
+
+
+@dataclass(frozen=True)
+class QueryLogEntry:
+    """Query log payload for SQLite storage.
+
+    Args:
+        query_text: User query text.
+        retrieved_chunks: Retrieved chunk UID list.
+        answer: Generated answer text (if any).
+        latency_ms: Total latency in milliseconds.
+        model: Model identifier string.
+    """
+
+    query_text: str
+    retrieved_chunks: Sequence[str] | None = None
+    answer: str | None = None
+    latency_ms: int | None = None
+    model: str | None = None
+
+
+def ensure_query_log_schema(conn: sqlite3.Connection) -> None:
+    """Ensure the query_log table exists.
+
+    Args:
+        conn: Open SQLite connection.
+    """
+
+    conn.execute(_QUERY_LOG_TABLE_SQL)
+
+
+def insert_query_log(db_path: Path, entry: QueryLogEntry) -> int:
+    """Insert a query log entry into SQLite.
+
+    Args:
+        db_path: SQLite database path.
+        entry: QueryLogEntry payload.
+    Returns:
+        The inserted query_id.
+    Raises:
+        FileNotFoundError: If the database path does not exist.
+        ValueError: If query_text is empty.
+        sqlite3.Error: If the insert fails.
+    """
+
+    if not db_path.exists():
+        raise FileNotFoundError(f"Database not found: {db_path}")
+    if not entry.query_text.strip():
+        raise ValueError("query_text must be non-empty")
+
+    retrieved_chunks = (
+        json.dumps(list(entry.retrieved_chunks))
+        if entry.retrieved_chunks is not None
+        else None
+    )
+    with sqlite3.connect(db_path) as conn:
+        ensure_query_log_schema(conn)
+        cursor = conn.execute(
+            """
+            INSERT INTO query_log (query_text, retrieved_chunks, answer, latency_ms, model)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                entry.query_text,
+                retrieved_chunks,
+                entry.answer,
+                entry.latency_ms,
+                entry.model,
+            ),
+        )
+        conn.commit()
+        return int(cursor.lastrowid)
 
 
 def ensure_papers_schema(
@@ -168,6 +255,7 @@ def ensure_papers_db(db_path: Path) -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(db_path) as conn:
         ensure_papers_schema(conn, create_if_missing=True)
+        ensure_query_log_schema(conn)
         conn.commit()
 
 
@@ -225,6 +313,52 @@ def load_page_numbers_by_paper(
         pages_by_paper.setdefault(paper_id, set()).add(page_number)
 
     return pages_by_paper
+
+
+def load_chunk_uids_by_page(
+    db_path: Path,
+    pages: Sequence[tuple[str, int]],
+) -> dict[tuple[str, int], list[str]]:
+    """Load chunk UIDs for specific (paper_id, page_number) pairs.
+
+    Args:
+        db_path: SQLite database path.
+        pages: Sequence of (paper_id, page_number) pairs.
+    Returns:
+        Mapping of (paper_id, page_number) to chunk UID list.
+    Raises:
+        FileNotFoundError: If the database path does not exist.
+        sqlite3.Error: If the query fails.
+    """
+
+    if not db_path.exists():
+        raise FileNotFoundError(f"Database not found: {db_path}")
+
+    unique_pairs = list({(paper_id, page) for paper_id, page in pages if paper_id})
+    if not unique_pairs:
+        return {}
+
+    clauses = " OR ".join("(paper_id = ? AND page_number = ?)" for _ in unique_pairs)
+    params: list[object] = []
+    for paper_id, page_number in unique_pairs:
+        params.extend([paper_id, page_number])
+
+    sql = f"""
+        SELECT paper_id, page_number, chunk_uid
+        FROM chunks
+        WHERE {clauses}
+    """
+
+    mapping: dict[tuple[str, int], list[str]] = {
+        (paper_id, page_number): [] for paper_id, page_number in unique_pairs
+    }
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(sql, params).fetchall()
+
+    for paper_id, page_number, chunk_uid in rows:
+        mapping.setdefault((paper_id, page_number), []).append(chunk_uid)
+
+    return mapping
 
 
 def load_paper_pdf_paths(
