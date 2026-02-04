@@ -99,10 +99,31 @@ def load_parsed_document(path: Path) -> ParsedDocument:
         ValueError: If required fields are missing.
     """
 
+    if path.suffix.lower() != ".json":
+        raise ValueError(
+            f"--parsed expects JSON files, got: {path}. "
+            "Run parse.py first to generate data/parsed/<paper>.json."
+        )
+
     if not path.exists():
         raise FileNotFoundError(f"Parsed JSON not found: {path}")
 
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        payload_text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError(
+            f"Parsed JSON must be UTF-8 text: {path}. "
+            "Run parse.py first to generate data/parsed/<paper>.json."
+        ) from exc
+
+    try:
+        payload = json.loads(payload_text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid parsed JSON in {path}: {exc}") from exc
+
+    if not isinstance(payload, dict):
+        raise ValueError(f"Parsed JSON must be an object at top level: {path}")
+
     doc_id = payload.get("doc_id")
     if not doc_id:
         raise ValueError(f"Parsed JSON missing doc_id: {path}")
@@ -366,8 +387,12 @@ def _iter_parsed_paths(paths: list[Path]) -> list[Path]:
     for path in paths:
         if path.is_dir():
             expanded.extend(sorted(path.glob("*.json")))
-        else:
-            expanded.append(path)
+            continue
+        if path.suffix.lower() != ".json":
+            raise ValueError(
+                f"--parsed expects JSON files or directories, got: {path}"
+            )
+        expanded.append(path)
     return expanded
 
 
@@ -416,7 +441,11 @@ def main() -> int:
     args = _parse_args()
     logging.basicConfig(level=logging.INFO)
 
-    parsed_paths = _iter_parsed_paths([Path(p) for p in args.parsed])
+    try:
+        parsed_paths = _iter_parsed_paths([Path(p) for p in args.parsed])
+    except ValueError as exc:
+        print(f"Error: {exc}", flush=True)
+        return 1
     if not parsed_paths:
         print("No parsed JSON files found.", flush=True)
         return 1
@@ -442,7 +471,11 @@ def main() -> int:
     total_chunks = 0
     with sqlite3.connect(db_path) as conn:
         for parsed_path in parsed_paths:
-            parsed_doc = load_parsed_document(parsed_path)
+            try:
+                parsed_doc = load_parsed_document(parsed_path)
+            except (FileNotFoundError, ValueError) as exc:
+                print(f"Error: {exc}", flush=True)
+                return 1
             paper_id = _resolve_paper_id(
                 conn,
                 parsed_doc,

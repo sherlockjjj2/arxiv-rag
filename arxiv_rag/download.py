@@ -5,12 +5,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sqlite3
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Callable, Iterable, Sequence
+from typing import Any, Callable, Iterable, Sequence
 
 import arxiv
 import requests
@@ -28,6 +29,7 @@ DEFAULT_DB_PATH = Path("data/arxiv_rag.db")
 _USER_AGENT = "arxiv-rag/0.1.0"
 _CLIENT_DELAY_SECONDS = 10.0
 _CLIENT_NUM_RETRIES = 5
+_CLIENT_TIMEOUT_SECONDS = 20.0
 SOURCE_TYPE_ARXIV = "arxiv"
 
 SORT_CRITERIA: dict[str, arxiv.SortCriterion] = {
@@ -47,6 +49,7 @@ class DownloadConfig:
         user_agent: User-Agent string for PDF requests.
         client_delay_seconds: Delay between arXiv API calls.
         client_num_retries: Retry count for arXiv API calls.
+        client_timeout_seconds: Timeout for each arXiv API request.
         default_db_path: Default metadata SQLite path.
     """
 
@@ -55,6 +58,7 @@ class DownloadConfig:
     user_agent: str
     client_delay_seconds: float
     client_num_retries: int
+    client_timeout_seconds: float
     default_db_path: Path
 
 
@@ -147,6 +151,51 @@ class ArxivApiClient:
         return results
 
 
+class _ArxivTimeoutSession(requests.Session):
+    """Requests session that injects a default timeout for API calls."""
+
+    def __init__(self, timeout_seconds: float) -> None:
+        """Initialize the session.
+
+        Args:
+            timeout_seconds: Default timeout for all outgoing requests.
+        Raises:
+            ValueError: If timeout_seconds is not positive.
+        """
+
+        if timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive")
+        super().__init__()
+        self._timeout_seconds = timeout_seconds
+
+    @property
+    def timeout_seconds(self) -> float:
+        """Return the configured default timeout in seconds."""
+
+        return self._timeout_seconds
+
+    def request(
+        self,
+        method: str,
+        url: str,
+        **kwargs: Any,
+    ) -> requests.Response:
+        """Send a request and apply a default timeout if omitted.
+
+        Args:
+            method: HTTP method.
+            url: Request URL.
+            **kwargs: Requests keyword arguments.
+        Returns:
+            The HTTP response returned by requests.
+        Edge cases:
+            If a timeout is already provided, it is preserved.
+        """
+
+        kwargs.setdefault("timeout", self._timeout_seconds)
+        return super().request(method, url, **kwargs)
+
+
 def default_config() -> DownloadConfig:
     """Build the default configuration from module constants.
 
@@ -162,6 +211,7 @@ def default_config() -> DownloadConfig:
         user_agent=_USER_AGENT,
         client_delay_seconds=_CLIENT_DELAY_SECONDS,
         client_num_retries=_CLIENT_NUM_RETRIES,
+        client_timeout_seconds=_CLIENT_TIMEOUT_SECONDS,
         default_db_path=DEFAULT_DB_PATH,
     )
 
@@ -181,7 +231,26 @@ def create_arxiv_client(config: DownloadConfig) -> ArxivApiClient:
         delay_seconds=config.client_delay_seconds,
         num_retries=config.client_num_retries,
     )
+    client._session = _ArxivTimeoutSession(config.client_timeout_seconds)
     return ArxivApiClient(client=client)
+
+
+def _format_arxiv_api_error(exc: Exception) -> str:
+    """Build a concise operator-facing message for API failures.
+
+    Args:
+        exc: Exception raised while calling the arXiv API.
+    Returns:
+        Human-readable error message with proxy hints when available.
+    """
+
+    proxy_vars = [
+        key for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY") if os.getenv(key)
+    ]
+    proxy_hint = ""
+    if proxy_vars:
+        proxy_hint = f" Active proxy env vars: {', '.join(proxy_vars)}."
+    return f"Error: failed to reach the arXiv API ({exc}).{proxy_hint}"
 
 
 def _resolve_config(config: DownloadConfig | None) -> DownloadConfig:
@@ -999,6 +1068,18 @@ def _parse_args(config: DownloadConfig | None = None) -> argparse.Namespace:
         help="Download timeout in seconds.",
     )
     parser.add_argument(
+        "--api-retries",
+        type=int,
+        default=resolved_config.client_num_retries,
+        help="arXiv API retries for search/metadata fetch calls.",
+    )
+    parser.add_argument(
+        "--api-timeout",
+        type=float,
+        default=resolved_config.client_timeout_seconds,
+        help="Timeout in seconds for each arXiv API request.",
+    )
+    parser.add_argument(
         "--db",
         type=Path,
         default=resolved_config.default_db_path,
@@ -1027,6 +1108,17 @@ def main() -> int:
 
     config = default_config()
     args = _parse_args(config)
+    if args.api_retries < 0:
+        print("Error: --api-retries must be >= 0.", file=sys.stderr)
+        return 2
+    if args.api_timeout <= 0:
+        print("Error: --api-timeout must be > 0.", file=sys.stderr)
+        return 2
+    config = replace(
+        config,
+        client_num_retries=args.api_retries,
+        client_timeout_seconds=args.api_timeout,
+    )
     db_path = None if args.no_db else args.db
     if not (args.query or args.ids or args.backfill_db):
         print(
@@ -1034,19 +1126,23 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
-    if db_path and (args.ids or args.backfill_db):
-        _ensure_db(db_path)
-    if args.backfill_db:
-        return _backfill_metadata(db_path, config=config) if db_path else 2
-    if args.query:
-        return _search(args.query, args.max_results, args.sort, config=config)
-    return (
-        _download_by_id(
-            args.ids, args.retries, args.timeout, db_path=db_path, config=config
+    try:
+        if db_path and (args.ids or args.backfill_db):
+            _ensure_db(db_path)
+        if args.backfill_db:
+            return _backfill_metadata(db_path, config=config) if db_path else 2
+        if args.query:
+            return _search(args.query, args.max_results, args.sort, config=config)
+        return (
+            _download_by_id(
+                args.ids, args.retries, args.timeout, db_path=db_path, config=config
+            )
+            if args.ids
+            else 2
         )
-        if args.ids
-        else 2
-    )
+    except (requests.RequestException, arxiv.HTTPError) as exc:
+        print(_format_arxiv_api_error(exc), file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

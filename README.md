@@ -38,6 +38,12 @@ Note: Chroma depends on `onnxruntime` wheels; Python 3.13 is recommended (3.14 m
 uv run python arxiv_rag/download.py --query "keyword phrase" --max-results 25 --sort relevance
 ```
 
+If requests appear to hang, lower API retry/timeout:
+
+```bash
+uv run python arxiv_rag/download.py --query "keyword phrase" --max-results 25 --sort relevance --api-retries 1 --api-timeout 10
+```
+
 2. Download PDFs by base ID:
 
 ```bash
@@ -81,6 +87,11 @@ uv run python -m arxiv_rag.cli query "dense retrieval" --top-k 5 --mode vector
 ```bash
 uv run python arxiv_rag/download.py --query "keyword phrase" --max-results 25 --sort relevance
 ```
+
+Troubleshooting:
+
+- If the command is slow or seems stuck, use `--api-retries 1 --api-timeout 10` to fail fast.
+- Check proxy env vars with `env | rg -i proxy`; stale proxy settings (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`) can block arXiv requests.
 
 ### Download PDFs by ID
 
@@ -127,6 +138,9 @@ uv run python arxiv_rag/chunk.py --parsed data/parsed/2505.09388v1.json --db dat
 ```bash
 uv run python arxiv_rag/chunk.py --parsed data/parsed --db data/arxiv_rag.db
 ```
+
+`--parsed` only accepts parsed `.json` files (or directories containing `.json` files).  
+If you only have a PDF, run `parse.py` first.
 
 When a paper is re-parsed with a new PDF version, existing chunks for that `paper_id`
 are deleted and replaced with the latest version.
@@ -241,6 +255,7 @@ uv run python -m arxiv_rag.cli query "How does dense retrieval work?" --mode hyb
 Notes:
 
 - `--generate` formats retrieved chunks into a citation prompt and returns a cited answer.
+- `--verify` requires `--generate` and validates the generated answer only.
 - Default generation model is `gpt-4o-mini`; override with `--generate-model`.
 - `--verify` enforces paragraph-level citation coverage and quote matching against page text.
 
@@ -276,13 +291,13 @@ uv run python -m arxiv_rag.cli eval-generate --db data/arxiv_rag.db --output eva
 Run retrieval-only evaluation (Recall@5/10 + MRR):
 
 ```bash
-uv run python -m arxiv_rag.cli eval-run --eval-set eval/eval_set.json --db data/arxiv_rag.db
+uv run python -m arxiv_rag.cli eval-run --eval-set-path eval/eval_set.json --db data/arxiv_rag.db
 ```
 
 Run evaluation with answer generation to compute chunk-level citation accuracy:
 
 ```bash
-uv run python -m arxiv_rag.cli eval-run --eval-set eval/eval_set.json --db data/arxiv_rag.db --generate
+uv run python -m arxiv_rag.cli eval-run --eval-set-path eval/eval_set.json --db data/arxiv_rag.db --generate
 ```
 
 Notes:
@@ -294,6 +309,14 @@ Notes:
 
 ```bash
 uv run python -m arxiv_rag.cli inspect --db data/arxiv_rag.db
+```
+
+### Quick corpus stats (SQLite)
+
+There is no dedicated `stats` CLI command yet. Use SQLite directly:
+
+```bash
+sqlite3 data/arxiv_rag.db "SELECT COUNT(*) AS papers FROM papers; SELECT COUNT(*) AS chunks FROM chunks;"
 ```
 
 ## Data locations
