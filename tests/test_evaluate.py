@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 import time
 
@@ -357,3 +358,67 @@ def test_run_eval_avoids_duplicate_generation_with_concurrency(
     )
 
     assert generation_calls["count"] == 1
+
+
+def test_run_eval_works_inside_running_event_loop(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    db_path = tmp_path / "eval.db"
+    db_path.touch()
+
+    eval_set = EvalSet(
+        eval_set=[
+            EvalItem(
+                query_id="q1",
+                query="Explain dense retrieval",
+                difficulty="factual",
+                ground_truth=EvalGroundTruth(
+                    chunk_uids=["uid-1"],
+                    papers=["1234.5678"],
+                    pages=[[1]],
+                ),
+                reference_answer="Ref",
+            )
+        ],
+        metadata=EvalMetadata(
+            created="2026-02-04",
+            corpus_version="v1",
+            n_queries=1,
+        ),
+    )
+
+    def _fake_run_retrieval(*, query, db_path, retrieval_config, **kwargs):
+        del query, db_path, retrieval_config, kwargs
+        return (
+            [
+                ChunkResult(
+                    chunk_uid="uid-1",
+                    chunk_id=1,
+                    paper_id="1234.5678",
+                    page_number=1,
+                    text="chunk text",
+                    score=1.0,
+                )
+            ],
+            [],
+        )
+
+    monkeypatch.setattr(evaluate_module, "_run_retrieval", _fake_run_retrieval)
+    monkeypatch.setattr(evaluate_module, "generate_answer", lambda *args, **kwargs: "A")
+    monkeypatch.setattr(evaluate_module, "parse_citations", lambda answer: [])
+
+    async def _invoke() -> None:
+        report = run_eval(
+            eval_set=eval_set,
+            db_path=db_path,
+            retrieval_config=evaluate_module.RetrievalConfig(mode="fts", top_k=5),
+            generate=True,
+            generate_model="gpt-4o-mini",
+            generation_top_k=1,
+            generation_concurrency=2,
+            cache_db_path=None,
+        )
+        assert report.summary.n_queries == 1
+
+    asyncio.run(_invoke())

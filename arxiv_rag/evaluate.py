@@ -1481,6 +1481,21 @@ def _run_generation_stage(
     if generation_concurrency <= 0:
         raise ValueError("generation_concurrency must be > 0")
 
+    if _has_running_event_loop():
+        LOGGER.debug(
+            "Running event loop detected; using synchronous generation fallback."
+        )
+        for computation in computations:
+            _generate_for_computation_sync(
+                computation=computation,
+                db_path=db_path,
+                generate_model=generate_model,
+                generation_top_k=generation_top_k,
+                cache=cache,
+                prompt_version=prompt_version,
+            )
+        return
+
     asyncio.run(
         _run_generation_stage_async(
             computations=computations,
@@ -1492,6 +1507,16 @@ def _run_generation_stage(
             prompt_version=prompt_version,
         )
     )
+
+
+def _has_running_event_loop() -> bool:
+    """Return whether the current thread already has an active event loop."""
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    return True
 
 
 async def _run_generation_stage_async(
@@ -1617,6 +1642,89 @@ async def _generate_for_computation(
         )
     except ValueError as exc:
         computation.citation_error = str(exc)
+
+
+def _generate_for_computation_sync(
+    *,
+    computation: _EvalComputation,
+    db_path: Path,
+    generate_model: str,
+    generation_top_k: int,
+    cache: EvalCache | None,
+    prompt_version: str | None,
+) -> None:
+    """Generate one answer synchronously and update citation fields."""
+
+    generation_chunks = _build_generation_chunks(
+        computation.retrieval_results,
+        generation_top_k,
+    )
+    chunk_uids_hash = _hash_chunk_uids(generation_chunks)
+    cache_key = _build_generation_cache_key(
+        query=computation.item.query,
+        generate_model=generate_model,
+        prompt_version=prompt_version,
+        chunk_uids_hash=chunk_uids_hash,
+    )
+
+    answer: str | None = None
+    if cache is not None and cache_key is not None:
+        answer = cache.get_generated_answer(
+            query=cache_key[0],
+            generation_model=cache_key[1],
+            prompt_version=cache_key[2],
+            chunk_uids_hash=cache_key[3],
+        )
+
+    if answer is None:
+        answer = _generate_answer_sync(
+            computation=computation,
+            generate_model=generate_model,
+            generation_chunks=generation_chunks,
+        )
+        if answer is not None and cache is not None and cache_key is not None:
+            cache.set_generated_answer(
+                query=cache_key[0],
+                generation_model=cache_key[1],
+                prompt_version=cache_key[2],
+                chunk_uids_hash=cache_key[3],
+                answer=answer,
+            )
+
+    if answer is None:
+        return
+
+    try:
+        citations = parse_citations(answer)
+        computation.citation_count = len(citations)
+        computation.citation_accuracy = _score_citations_for_item(
+            citations,
+            ground_truth_chunk_uids=computation.item.ground_truth.chunk_uids,
+            db_path=db_path,
+        )
+    except ValueError as exc:
+        computation.citation_error = str(exc)
+
+
+def _generate_answer_sync(
+    *,
+    computation: _EvalComputation,
+    generate_model: str,
+    generation_chunks: list[GenerationChunk],
+) -> str | None:
+    """Generate an answer synchronously and capture generation errors."""
+
+    try:
+        return generate_answer(
+            computation.item.query,
+            generation_chunks,
+            model=generate_model,
+        )
+    except ValueError as exc:
+        computation.generation_error = str(exc)
+    except RuntimeError as exc:
+        computation.generation_error = str(exc)
+    return None
 
 
 async def _generate_answer_with_semaphore(
