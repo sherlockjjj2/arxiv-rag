@@ -258,6 +258,7 @@ class EvalItemResult:
         first_correct_rank: Rank of first correct chunk, if any.
         retrieved_chunk_uids: Retrieved chunk identifiers.
         ground_truth_chunk_uids: Ground truth chunk identifiers.
+        citation_count: Number of parsed citations in generated answer.
         citation_accuracy: Citation accuracy, if generated.
         citation_error: Citation parse or validation error.
         generation_error: Generation error, if any.
@@ -272,6 +273,7 @@ class EvalItemResult:
     first_correct_rank: int | None
     retrieved_chunk_uids: list[str]
     ground_truth_chunk_uids: list[str]
+    citation_count: int | None = None
     citation_accuracy: float | None = None
     citation_error: str | None = None
     generation_error: str | None = None
@@ -289,6 +291,7 @@ class EvalItemResult:
             "first_correct_rank": self.first_correct_rank,
             "retrieved_chunk_uids": list(self.retrieved_chunk_uids),
             "ground_truth_chunk_uids": list(self.ground_truth_chunk_uids),
+            "citation_count": self.citation_count,
             "citation_accuracy": self.citation_accuracy,
             "citation_error": self.citation_error,
             "generation_error": self.generation_error,
@@ -305,6 +308,8 @@ class EvalSummary:
         recall_at_10: Mean Recall@10.
         mrr: Mean MRR.
         citation_accuracy: Mean citation accuracy (if computed).
+        citation_accuracy_when_recall5_hit: Mean citation accuracy for items where
+            recall@5 > 0 (if computed).
         n_queries: Number of evaluated queries.
     """
 
@@ -312,6 +317,7 @@ class EvalSummary:
     recall_at_10: float
     mrr: float
     citation_accuracy: float | None
+    citation_accuracy_when_recall5_hit: float | None
     n_queries: int
 
     def as_dict(self) -> dict[str, object]:
@@ -322,6 +328,9 @@ class EvalSummary:
             "recall_at_10": self.recall_at_10,
             "mrr": self.mrr,
             "citation_accuracy": self.citation_accuracy,
+            "citation_accuracy_when_recall5_hit": (
+                self.citation_accuracy_when_recall5_hit
+            ),
             "n_queries": self.n_queries,
         }
 
@@ -334,7 +343,8 @@ class EvalFailureSummary:
         retrieval_empty: Queries with no retrieval results.
         recall_at_5_zero: Queries with recall@5 == 0.
         mrr_zero: Queries with mrr == 0.
-        citation_missing: Generated answers with no citations.
+        citation_absent: Generated answers with no parsed citations.
+        citation_zero_score: Generated answers with citations but score == 0.
         citation_parse_error: Answers with malformed citations.
         citation_inaccurate: Answers with citation accuracy < 1.
     """
@@ -342,7 +352,8 @@ class EvalFailureSummary:
     retrieval_empty: int
     recall_at_5_zero: int
     mrr_zero: int
-    citation_missing: int
+    citation_absent: int
+    citation_zero_score: int
     citation_parse_error: int
     citation_inaccurate: int
 
@@ -353,7 +364,8 @@ class EvalFailureSummary:
             "retrieval_empty": self.retrieval_empty,
             "recall_at_5_zero": self.recall_at_5_zero,
             "mrr_zero": self.mrr_zero,
-            "citation_missing": self.citation_missing,
+            "citation_absent": self.citation_absent,
+            "citation_zero_score": self.citation_zero_score,
             "citation_parse_error": self.citation_parse_error,
             "citation_inaccurate": self.citation_inaccurate,
         }
@@ -1009,6 +1021,7 @@ def run_eval(
     recall_10_scores: list[float] = []
     mrr_scores: list[float] = []
     citation_scores: list[float] = []
+    citation_scores_recall5_hit: list[float] = []
 
     for item in eval_set.eval_set:
         retrieval_results, warnings = _run_retrieval(
@@ -1038,6 +1051,7 @@ def run_eval(
         recall_10_scores.append(recall_10)
         mrr_scores.append(mrr)
 
+        citation_count = None
         citation_accuracy = None
         citation_error = None
         generation_error = None
@@ -1056,12 +1070,15 @@ def run_eval(
             else:
                 try:
                     citations = parse_citations(answer)
+                    citation_count = len(citations)
                     citation_accuracy = _score_citations_for_item(
                         citations,
                         ground_truth_chunk_uids=item.ground_truth.chunk_uids,
                         db_path=db_path,
                     )
                     citation_scores.append(citation_accuracy)
+                    if recall_5 > 0.0:
+                        citation_scores_recall5_hit.append(citation_accuracy)
                 except ValueError as exc:
                     citation_error = str(exc)
 
@@ -1075,6 +1092,7 @@ def run_eval(
                 first_correct_rank=first_rank,
                 retrieved_chunk_uids=retrieved_uids,
                 ground_truth_chunk_uids=list(item.ground_truth.chunk_uids),
+                citation_count=citation_count,
                 citation_accuracy=citation_accuracy,
                 citation_error=citation_error,
                 generation_error=generation_error,
@@ -1087,6 +1105,9 @@ def run_eval(
         recall_at_10=_mean(recall_10_scores),
         mrr=_mean(mrr_scores),
         citation_accuracy=_mean(citation_scores) if citation_scores else None,
+        citation_accuracy_when_recall5_hit=(
+            _mean(citation_scores_recall5_hit) if citation_scores_recall5_hit else None
+        ),
         n_queries=len(results),
     )
     failures = _summarize_failures(results)
@@ -1206,10 +1227,20 @@ def _summarize_failures(results: Sequence[EvalItemResult]) -> EvalFailureSummary
     retrieval_empty = sum(1 for item in results if not item.retrieved_chunk_uids)
     recall_at_5_zero = sum(1 for item in results if item.recall_at_5 == 0.0)
     mrr_zero = sum(1 for item in results if item.mrr == 0.0)
-    citation_missing = sum(
+    citation_absent = sum(
         1
         for item in results
-        if item.citation_accuracy is not None and item.citation_accuracy == 0.0
+        if item.citation_count is not None and item.citation_count == 0
+    )
+    citation_zero_score = sum(
+        1
+        for item in results
+        if (
+            item.citation_accuracy is not None
+            and item.citation_count is not None
+            and item.citation_count > 0
+            and item.citation_accuracy == 0.0
+        )
     )
     citation_parse_error = sum(1 for item in results if item.citation_error)
     citation_inaccurate = sum(
@@ -1222,7 +1253,8 @@ def _summarize_failures(results: Sequence[EvalItemResult]) -> EvalFailureSummary
         retrieval_empty=retrieval_empty,
         recall_at_5_zero=recall_at_5_zero,
         mrr_zero=mrr_zero,
-        citation_missing=citation_missing,
+        citation_absent=citation_absent,
+        citation_zero_score=citation_zero_score,
         citation_parse_error=citation_parse_error,
         citation_inaccurate=citation_inaccurate,
     )
@@ -1258,6 +1290,11 @@ def render_report_markdown(report: EvalReport) -> str:
     ]
     if summary.citation_accuracy is not None:
         lines.append(f"- Citation accuracy: {summary.citation_accuracy:.3f}")
+    if summary.citation_accuracy_when_recall5_hit is not None:
+        lines.append(
+            "- Citation accuracy (Recall@5 > 0): "
+            f"{summary.citation_accuracy_when_recall5_hit:.3f}"
+        )
     lines.append(f"- Queries: {summary.n_queries}")
 
     lines.extend(
@@ -1267,7 +1304,8 @@ def render_report_markdown(report: EvalReport) -> str:
             f"- Retrieval empty: {report.failures.retrieval_empty}",
             f"- Recall@5 = 0: {report.failures.recall_at_5_zero}",
             f"- MRR = 0: {report.failures.mrr_zero}",
-            f"- Citation missing: {report.failures.citation_missing}",
+            f"- Citation absent: {report.failures.citation_absent}",
+            f"- Citation zero score: {report.failures.citation_zero_score}",
             f"- Citation parse errors: {report.failures.citation_parse_error}",
             f"- Citation inaccurate: {report.failures.citation_inaccurate}",
         ]

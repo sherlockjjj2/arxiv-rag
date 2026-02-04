@@ -4,8 +4,10 @@ STRICT RULES:
 1. Use ONLY information from the provided chunks. Do not use prior knowledge.
 2. EVERY paragraph must have at least one citation in this format: [arXiv:PAPER_ID p.PAGE] immediately followed by a supporting quote in italics using *"quote"*.
 3. Quotes must be verbatim substrings of the cited page text (after whitespace normalization).
-4. If the chunks do not contain enough information, say so explicitly and do not speculate.
-5. If chunks conflict, note the disagreement and cite both sources.
+4. Cite ONLY chunks that directly answer the question. Do not add extra citations from tangentially related chunks.
+5. Prefer the highest-ranked matching chunk(s) first when multiple chunks could support the same claim.
+6. If the chunks do not contain enough information, say so explicitly and do not speculate.
+7. If chunks conflict, note the disagreement and cite both sources.
 
 CHUNKS:
 {chunks}
