@@ -12,7 +12,7 @@ from typing import Iterable, Literal, Mapping, Sequence
 
 from arxiv_rag.chroma_client import ChromaConfig, ChromaStore
 from arxiv_rag.db import deserialize_embedding_array, normalize_embedding
-from arxiv_rag.embeddings_client import EmbeddingsClient
+from arxiv_rag.embeddings_client import EmbeddingsClientLike
 
 _STOPWORDS = {
     "a",
@@ -345,7 +345,7 @@ def search_vector(
     *,
     top_k: int,
     db_path: Path,
-    embeddings_client: EmbeddingsClient,
+    embeddings_client: EmbeddingsClientLike,
 ) -> list[ChunkResult]:
     """Search chunks by cosine similarity using stored embeddings.
 
@@ -375,7 +375,7 @@ def search_vector_chroma(
     *,
     top_k: int,
     db_path: Path,
-    embeddings_client: EmbeddingsClient,
+    embeddings_client: EmbeddingsClientLike,
     chroma_config: ChromaConfig,
     chroma_store: ChromaStore | None = None,
 ) -> list[ChunkResult]:
@@ -505,7 +505,7 @@ def search_hybrid(
     *,
     top_k: int,
     db_path: Path,
-    embeddings_client: EmbeddingsClient,
+    embeddings_client: EmbeddingsClientLike,
     chroma_config: ChromaConfig,
     chroma_store: ChromaStore | None = None,
     rrf_k: int = 60,

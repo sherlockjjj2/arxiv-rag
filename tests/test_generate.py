@@ -138,7 +138,7 @@ def test_generate_answer_uses_prompt_and_model(monkeypatch: pytest.MonkeyPatch) 
     captured: dict[str, object] = {}
 
     class DummyClient:
-        def __init__(self, config: GenerationConfig) -> None:
+        def __init__(self, config: object) -> None:
             captured["config"] = config
 
         def generate(self, *, prompt: str, query: str) -> str:

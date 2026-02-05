@@ -225,14 +225,17 @@ def load_prompt_template(path: Path | None = None) -> str:
         ValueError: If the prompt template is empty.
     """
 
+    template: str
     if path is not None:
         prompt_path = path
         if not prompt_path.exists():
             raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
         template = prompt_path.read_text(encoding="utf-8")
     else:
-        template = _load_packaged_prompt_template()
-        if template is None:
+        packaged_template = _load_packaged_prompt_template()
+        if packaged_template is not None:
+            template = packaged_template
+        else:
             prompt_path = _DEFAULT_PROMPT_PATH
             if not prompt_path.exists():
                 raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
@@ -255,14 +258,17 @@ def load_chunk_citation_prompt_template(path: Path | None = None) -> str:
         ValueError: If the prompt template is empty.
     """
 
+    template: str
     if path is not None:
         prompt_path = path
         if not prompt_path.exists():
             raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
         template = prompt_path.read_text(encoding="utf-8")
     else:
-        template = _load_packaged_prompt("generate_with_chunk_citations.txt")
-        if template is None:
+        packaged_template = _load_packaged_prompt("generate_with_chunk_citations.txt")
+        if packaged_template is not None:
+            template = packaged_template
+        else:
             prompt_path = _DEFAULT_CHUNK_CITATION_PROMPT_PATH
             if not prompt_path.exists():
                 raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
@@ -322,14 +328,17 @@ def load_selection_prompt_template(path: Path | None = None) -> str:
         ValueError: If the prompt template is empty.
     """
 
+    template: str
     if path is not None:
         prompt_path = path
         if not prompt_path.exists():
             raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
         template = prompt_path.read_text(encoding="utf-8")
     else:
-        template = _load_packaged_prompt("select_evidence.txt")
-        if template is None:
+        packaged_template = _load_packaged_prompt("select_evidence.txt")
+        if packaged_template is not None:
+            template = packaged_template
+        else:
             prompt_path = _DEFAULT_SELECTION_PROMPT_PATH
             if not prompt_path.exists():
                 raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
@@ -352,14 +361,17 @@ def load_quote_selection_prompt_template(path: Path | None = None) -> str:
         ValueError: If the prompt template is empty.
     """
 
+    template: str
     if path is not None:
         prompt_path = path
         if not prompt_path.exists():
             raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
         template = prompt_path.read_text(encoding="utf-8")
     else:
-        template = _load_packaged_prompt("select_quote.txt")
-        if template is None:
+        packaged_template = _load_packaged_prompt("select_quote.txt")
+        if packaged_template is not None:
+            template = packaged_template
+        else:
             prompt_path = _DEFAULT_QUOTE_SELECTION_PROMPT_PATH
             if not prompt_path.exists():
                 raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
@@ -382,14 +394,17 @@ def load_quote_first_prompt_template(path: Path | None = None) -> str:
         ValueError: If the prompt template is empty.
     """
 
+    template: str
     if path is not None:
         prompt_path = path
         if not prompt_path.exists():
             raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
         template = prompt_path.read_text(encoding="utf-8")
     else:
-        template = _load_packaged_prompt("generate_quote_first.txt")
-        if template is None:
+        packaged_template = _load_packaged_prompt("generate_quote_first.txt")
+        if packaged_template is not None:
+            template = packaged_template
+        else:
             prompt_path = _DEFAULT_QUOTE_FIRST_PROMPT_PATH
             if not prompt_path.exists():
                 raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
@@ -412,14 +427,17 @@ def load_repair_prompt_template(path: Path | None = None) -> str:
         ValueError: If the prompt template is empty.
     """
 
+    template: str
     if path is not None:
         prompt_path = path
         if not prompt_path.exists():
             raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
         template = prompt_path.read_text(encoding="utf-8")
     else:
-        template = _load_packaged_prompt("repair_citations.txt")
-        if template is None:
+        packaged_template = _load_packaged_prompt("repair_citations.txt")
+        if packaged_template is not None:
+            template = packaged_template
+        else:
             prompt_path = _DEFAULT_REPAIR_PROMPT_PATH
             if not prompt_path.exists():
                 raise FileNotFoundError(f"Prompt template not found: {prompt_path}")

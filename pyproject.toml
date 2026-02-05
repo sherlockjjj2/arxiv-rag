@@ -48,3 +48,8 @@ filterwarnings = [
     "ignore:.*SwigPyObject.*:DeprecationWarning",
     "ignore:.*swigvarlink.*:DeprecationWarning",
 ]
+
+[tool.mypy]
+python_version = "3.13"
+strict = false  # start loose, tighten later
+ignore_missing_imports = true  # avoid noise from untyped libs

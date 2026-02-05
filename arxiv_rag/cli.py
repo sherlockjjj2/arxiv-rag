@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 from uuid import uuid4
 
 import typer
@@ -136,26 +136,25 @@ def _run_query(
     if verbose and mode == "hybrid":
         typer.echo("Raw scores: lower is better for BM25 and Chroma distance.")
 
-    for index, result in enumerate(results):
-        snippet = format_snippet(result.text, snippet_chars)
-        line = f"[arXiv:{result.paper_id} p.{result.page_number}] {snippet}"
-        if show_score:
-            if mode == "hybrid":
-                line = f"{line} (rrf={result.rrf_score:.6f})"
-            elif result.score is not None:
-                line = f"{line} (score={result.score:.3f})"
-        typer.echo(line)
-        if verbose:
-            if mode == "hybrid":
+    if mode == "hybrid":
+        hybrid_results = cast(list[HybridChunkResult], results)
+        for index, hybrid_result in enumerate(hybrid_results):
+            snippet = format_snippet(hybrid_result.text, snippet_chars)
+            line = (
+                f"[arXiv:{hybrid_result.paper_id} p.{hybrid_result.page_number}] "
+                f"{snippet}"
+            )
+            if show_score:
+                line = f"{line} (rrf={hybrid_result.rrf_score:.6f})"
+            typer.echo(line)
+            if verbose:
                 backends = "+".join(
-                    sorted({prov.backend for prov in result.provenance})
+                    sorted({prov.backend for prov in hybrid_result.provenance})
                 )
                 typer.echo(f"  sources={backends}")
-                typer.echo(f"  rrf_total={result.rrf_score:.6f}")
-                for prov in result.provenance:
-                    raw_value = (
-                        "n/a" if prov.raw_score is None else f"{prov.raw_score:.6f}"
-                    )
+                typer.echo(f"  rrf_total={hybrid_result.rrf_score:.6f}")
+                for prov in hybrid_result.provenance:
+                    raw_value = "n/a" if prov.raw_score is None else f"{prov.raw_score:.6f}"
                     typer.echo(
                         "  "
                         f"{prov.backend} "
@@ -164,10 +163,23 @@ def _run_query(
                         f"norm={prov.normalized_score:.6f} "
                         f"rrf={prov.rrf_contribution:.6f}"
                     )
-            elif result.score is not None:
-                typer.echo(f"  score={result.score:.6f}")
-        if index < len(results) - 1:
-            typer.echo()
+            if index < len(hybrid_results) - 1:
+                typer.echo()
+    else:
+        chunk_results = cast(list[ChunkResult], results)
+        for index, chunk_result in enumerate(chunk_results):
+            snippet = format_snippet(chunk_result.text, snippet_chars)
+            line = (
+                f"[arXiv:{chunk_result.paper_id} p.{chunk_result.page_number}] "
+                f"{snippet}"
+            )
+            if show_score and chunk_result.score is not None:
+                line = f"{line} (score={chunk_result.score:.3f})"
+            typer.echo(line)
+            if verbose and chunk_result.score is not None:
+                typer.echo(f"  score={chunk_result.score:.6f}")
+            if index < len(chunk_results) - 1:
+                typer.echo()
     return results, warnings
 
 
@@ -188,8 +200,9 @@ def _retrieve_results(
     """Retrieve chunks for a query without printing results."""
 
     warnings: list[str] = []
+    results: list[ChunkResult | HybridChunkResult]
     if mode == "fts":
-        results = search_fts(question, top_k=top_k, db_path=db)
+        results = list(search_fts(question, top_k=top_k, db_path=db))
     elif mode == "vector":
         embeddings_client = EmbeddingsClient(EmbeddingsConfig(model=model))
         chroma_config = ChromaConfig(
@@ -197,12 +210,14 @@ def _retrieve_results(
             collection_name=collection,
             distance=distance,
         )
-        results = search_vector_chroma(
+        results = list(
+            search_vector_chroma(
             question,
             top_k=top_k,
             db_path=db,
             embeddings_client=embeddings_client,
             chroma_config=chroma_config,
+            )
         )
     else:
         embeddings_client = EmbeddingsClient(EmbeddingsConfig(model=model))
@@ -222,7 +237,7 @@ def _retrieve_results(
             vector_weight=rrf_weight_vector,
         )
         warnings.extend(output.warnings)
-        results = output.results
+        results = list(output.results)
 
     return results, warnings
 

@@ -425,3 +425,10 @@ sqlite3 data/arxiv_rag.db "SELECT COUNT(*) AS papers FROM papers; SELECT COUNT(*
 ```bash
 uv run pytest
 ```
+
+## Linting / typing
+
+```bash
+uv run ruff check .
+uv run mypy .
+```

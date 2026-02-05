@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Protocol, Sequence
 
 from openai import APIError, APITimeoutError, OpenAI, RateLimitError
 from tenacity import (
@@ -44,6 +44,17 @@ class EmbeddingBatchResult:
 
     embeddings: list[list[float]]
     total_tokens: int | None
+
+
+class EmbeddingsClientLike(Protocol):
+    """Structural type for embeddings clients used throughout the project."""
+
+    @property
+    def config(self) -> EmbeddingsConfig:  # pragma: no cover - protocol
+        """Return the active embeddings configuration."""
+
+    def embed(self, inputs: Sequence[str]) -> EmbeddingBatchResult:  # pragma: no cover
+        """Embed input texts using the configured model."""
 
 
 class EmbeddingsClient:

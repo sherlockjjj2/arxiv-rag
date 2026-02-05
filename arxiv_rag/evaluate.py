@@ -32,6 +32,7 @@ from arxiv_rag.db import (
 from arxiv_rag.embeddings_client import (
     EmbeddingBatchResult,
     EmbeddingsClient,
+    EmbeddingsClientLike,
     EmbeddingsConfig,
 )
 from arxiv_rag.generate import (
@@ -826,7 +827,7 @@ class CachedEmbeddingsClient:
     def __init__(
         self,
         *,
-        base_client: EmbeddingsClient,
+        base_client: EmbeddingsClientLike,
         cache: EvalCache | None,
     ) -> None:
         """Initialize caching wrapper.

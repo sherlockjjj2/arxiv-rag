@@ -1038,7 +1038,7 @@ def verify_answer(
     paragraphs = map_paragraph_citations(answer)
     errors.extend(validate_paragraph_coverage(paragraphs))
 
-    status = "pass" if not errors else "fail"
+    status: Literal["pass", "fail"] = "pass" if not errors else "fail"
     return VerifyReport(
         status=status,
         errors=errors,
