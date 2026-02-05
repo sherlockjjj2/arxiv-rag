@@ -49,6 +49,7 @@ from arxiv_rag.retrieve import (
     ChunkResult,
     format_snippet,
     HybridChunkResult,
+    rerank_results_for_generation,
     search_fts,
     search_hybrid,
     search_vector_chroma,
@@ -700,6 +701,10 @@ def query(
         "gpt-4o-mini",
         help="Model for answer generation.",
     ),
+    generation_rerank: Literal["none", "lexical"] = typer.Option(
+        "none",
+        help="Rerank retrieved chunks before generation.",
+    ),
     verify: bool = typer.Option(
         False,
         help="Verify citations and quotes in the generated answer.",
@@ -774,6 +779,9 @@ def query(
                     ),
                 )
             raise typer.Exit(code=0)
+
+        if generation_rerank == "lexical":
+            results = rerank_results_for_generation(question, results)
 
         chunks = [
             GenerationChunk(
@@ -1145,6 +1153,10 @@ def eval_run(
         5,
         help="Number of chunks to pass into generation.",
     ),
+    generation_rerank: Literal["none", "lexical"] = typer.Option(
+        "none",
+        help="Rerank retrieved chunks before generation.",
+    ),
     generation_concurrency: int = typer.Option(
         4,
         help="Maximum concurrent generation calls when --generate is enabled.",
@@ -1201,6 +1213,7 @@ def eval_run(
             generate=generate,
             generate_model=generate_model,
             generation_top_k=effective_generation_top_k,
+            generation_rerank=generation_rerank,
             generation_concurrency=generation_concurrency,
             cache_db_path=None if disable_cache else cache_db,
         )

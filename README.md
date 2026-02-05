@@ -268,6 +268,7 @@ uv run python -m arxiv_rag.cli query "How does dense retrieval work?" --mode hyb
 Notes:
 
 - `--generate` formats retrieved chunks into a citation prompt and returns a cited answer.
+- Use `--generation-rerank lexical` to rerank retrieved chunks before generation (lexical overlap + original rank).
 - Generated answers apply a citation post-processing pass that remaps each citation to the best-supported retrieved `(paper_id, page_number)` using quote overlap.
 - `--verify` requires `--generate` and validates the generated answer only.
 - Default generation model is `gpt-4o-mini`; override with `--generate-model`.
@@ -327,6 +328,7 @@ Notes:
 - Eval summary includes `citation_accuracy_when_recall5_hit` to separate retrieval misses from citation selection issues.
 - Failure modes distinguish `citation_absent` (no parsed citations) from `citation_zero_score` (citations present but none matched ground truth).
 - Eval reports include generation-context diagnostics for missing ground-truth chunks or citations outside the provided context.
+- Use `--generation-rerank lexical` with `eval-run --generate` to rerank chunks before generation.
 - Generation for `eval-run --generate` is concurrent by default (`--generation-concurrency 4`) to reduce wall-clock latency.
 - `eval-run` now uses a persistent SQLite cache by default at `eval/cache/eval_cache.db` for query embeddings and generated answers.
 - Use `--disable-cache` to force fresh API calls, or `--cache-db <path>` to override the cache location.

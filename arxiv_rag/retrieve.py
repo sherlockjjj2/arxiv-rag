@@ -42,6 +42,8 @@ _STOPWORDS = {
     "with",
 }
 _MAX_REQUIRED_IMPORTANT_TERMS = 4
+_GENERATION_RERANK_LEXICAL_WEIGHT = 0.7
+_GENERATION_RERANK_RANK_WEIGHT = 0.3
 
 
 def _extract_fts_tokens(question: str) -> list[str]:
@@ -86,6 +88,18 @@ def _select_required_terms(terms: Sequence[str], max_terms: int) -> list[str]:
     )
     chosen_indices = sorted(index for index, _ in ranked[:max_terms])
     return [terms[index] for index in chosen_indices]
+
+
+def _tokenize_for_rerank(text: str) -> list[str]:
+    """Tokenize text for lexical reranking.
+
+    Args:
+        text: Input text to tokenize.
+    Returns:
+        Lowercased alphanumeric tokens.
+    """
+
+    return re.findall(r"[a-z0-9]+", text.lower())
 
 
 @dataclass(frozen=True)
@@ -279,6 +293,52 @@ def search_fts(
         )
         for row in rows
     ]
+
+
+def rerank_results_for_generation(
+    query: str,
+    results: Sequence[ChunkResult | HybridChunkResult],
+    *,
+    lexical_weight: float = _GENERATION_RERANK_LEXICAL_WEIGHT,
+    rank_weight: float = _GENERATION_RERANK_RANK_WEIGHT,
+) -> list[ChunkResult | HybridChunkResult]:
+    """Rerank retrieval results for generation using lexical overlap + rank.
+
+    Args:
+        query: User query text.
+        results: Retrieved chunks in original rank order.
+        lexical_weight: Weight applied to lexical overlap score.
+        rank_weight: Weight applied to original rank score.
+    Returns:
+        Reranked results list (stable on ties).
+    Raises:
+        ValueError: If weights are negative or both are zero.
+    """
+
+    if lexical_weight < 0 or rank_weight < 0:
+        raise ValueError("rerank weights must be >= 0")
+    if lexical_weight == 0 and rank_weight == 0:
+        raise ValueError("rerank weights cannot both be zero")
+    if not results:
+        return []
+
+    query_tokens = set(_tokenize_for_rerank(query))
+    if not query_tokens:
+        return list(results)
+
+    scored: list[tuple[float, int, ChunkResult | HybridChunkResult]] = []
+    for index, result in enumerate(results):
+        chunk_tokens = set(_tokenize_for_rerank(result.text))
+        if chunk_tokens:
+            overlap = len(query_tokens & chunk_tokens) / len(query_tokens)
+        else:
+            overlap = 0.0
+        rank_score = 1.0 / (index + 1)
+        score = (lexical_weight * overlap) + (rank_weight * rank_score)
+        scored.append((score, index, result))
+
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return [item[2] for item in scored]
 
 
 def search_vector(

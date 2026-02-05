@@ -42,6 +42,7 @@ from arxiv_rag.generate import (
 from arxiv_rag.retrieve import (
     ChunkResult,
     HybridChunkResult,
+    rerank_results_for_generation,
     search_fts,
     search_hybrid,
     search_vector_chroma,
@@ -1717,6 +1718,7 @@ def run_eval(
     generate: bool,
     generate_model: str,
     generation_top_k: int,
+    generation_rerank: Literal["none", "lexical"] = "none",
     generation_concurrency: int = 4,
     cache_db_path: Path | None = None,
 ) -> EvalReport:
@@ -1729,6 +1731,7 @@ def run_eval(
         generate: Whether to run generation and compute citation accuracy.
         generate_model: Model name for answer generation.
         generation_top_k: Number of chunks to pass to the generator.
+        generation_rerank: Rerank strategy for generation chunks.
         generation_concurrency: Maximum concurrent generation requests.
         cache_db_path: Optional SQLite cache path for embeddings/answers.
     Returns:
@@ -1812,6 +1815,7 @@ def run_eval(
                 db_path=db_path,
                 generate_model=generate_model,
                 generation_top_k=generation_top_k,
+                generation_rerank=generation_rerank,
                 generation_concurrency=generation_concurrency,
                 cache=cache,
                 prompt_version=prompt_version,
@@ -1885,6 +1889,7 @@ def _run_generation_stage(
     db_path: Path,
     generate_model: str,
     generation_top_k: int,
+    generation_rerank: Literal["none", "lexical"],
     generation_concurrency: int,
     cache: EvalCache | None,
     prompt_version: str | None,
@@ -1896,6 +1901,7 @@ def _run_generation_stage(
         db_path: SQLite database path for citation scoring.
         generate_model: Generation model name.
         generation_top_k: Number of chunks to pass to generation.
+        generation_rerank: Rerank strategy for generation chunks.
         generation_concurrency: Maximum number of in-flight generation requests.
         cache: Optional eval cache.
         prompt_version: Prompt hash for generated answer cache keys.
@@ -1916,6 +1922,7 @@ def _run_generation_stage(
                 db_path=db_path,
                 generate_model=generate_model,
                 generation_top_k=generation_top_k,
+                generation_rerank=generation_rerank,
                 cache=cache,
                 prompt_version=prompt_version,
             )
@@ -1927,6 +1934,7 @@ def _run_generation_stage(
             db_path=db_path,
             generate_model=generate_model,
             generation_top_k=generation_top_k,
+            generation_rerank=generation_rerank,
             generation_concurrency=generation_concurrency,
             cache=cache,
             prompt_version=prompt_version,
@@ -1950,6 +1958,7 @@ async def _run_generation_stage_async(
     db_path: Path,
     generate_model: str,
     generation_top_k: int,
+    generation_rerank: Literal["none", "lexical"],
     generation_concurrency: int,
     cache: EvalCache | None,
     prompt_version: str | None,
@@ -1961,6 +1970,7 @@ async def _run_generation_stage_async(
         db_path: SQLite database path for citation scoring.
         generate_model: Generation model name.
         generation_top_k: Number of chunks to pass to generation.
+        generation_rerank: Rerank strategy for generation chunks.
         generation_concurrency: Maximum number of in-flight generation requests.
         cache: Optional eval cache.
         prompt_version: Prompt hash for generated answer cache keys.
@@ -1974,6 +1984,7 @@ async def _run_generation_stage_async(
             db_path=db_path,
             generate_model=generate_model,
             generation_top_k=generation_top_k,
+            generation_rerank=generation_rerank,
             cache=cache,
             prompt_version=prompt_version,
             semaphore=semaphore,
@@ -1990,6 +2001,7 @@ async def _generate_for_computation(
     db_path: Path,
     generate_model: str,
     generation_top_k: int,
+    generation_rerank: Literal["none", "lexical"],
     cache: EvalCache | None,
     prompt_version: str | None,
     semaphore: asyncio.Semaphore,
@@ -2004,6 +2016,8 @@ async def _generate_for_computation(
     generation_chunks = _build_generation_chunks(
         computation.retrieval_results,
         generation_top_k,
+        query=computation.item.query,
+        generation_rerank=generation_rerank,
     )
     generation_chunk_uids = {chunk.chunk_uid for chunk in generation_chunks}
     computation.ground_truth_in_generation_context = bool(
@@ -2092,6 +2106,7 @@ def _generate_for_computation_sync(
     db_path: Path,
     generate_model: str,
     generation_top_k: int,
+    generation_rerank: Literal["none", "lexical"],
     cache: EvalCache | None,
     prompt_version: str | None,
 ) -> None:
@@ -2100,6 +2115,8 @@ def _generate_for_computation_sync(
     generation_chunks = _build_generation_chunks(
         computation.retrieval_results,
         generation_top_k,
+        query=computation.item.query,
+        generation_rerank=generation_rerank,
     )
     generation_chunk_uids = {chunk.chunk_uid for chunk in generation_chunks}
     computation.ground_truth_in_generation_context = bool(
@@ -2260,16 +2277,11 @@ def _run_retrieval(
             distance=retrieval_config.distance,
         )
         try:
-            base_embeddings_client = (
-                active_embeddings_client._base_client
-                if isinstance(active_embeddings_client, CachedEmbeddingsClient)
-                else active_embeddings_client
-            )
             results = list(search_vector_chroma(
                 query,
                 top_k=retrieval_config.top_k,
                 db_path=db_path,
-                embeddings_client=base_embeddings_client,
+                embeddings_client=active_embeddings_client,
                 chroma_config=active_chroma_config,
             ))
         except ImportError as exc:
@@ -2286,16 +2298,11 @@ def _run_retrieval(
             collection_name=retrieval_config.collection,
             distance=retrieval_config.distance,
         )
-        base_embeddings_client = (
-            active_embeddings_client._base_client
-            if isinstance(active_embeddings_client, CachedEmbeddingsClient)
-            else active_embeddings_client
-        )
         output = search_hybrid(
             query,
             top_k=retrieval_config.top_k,
             db_path=db_path,
-            embeddings_client=base_embeddings_client,
+            embeddings_client=active_embeddings_client,
             chroma_config=active_chroma_config,
             rrf_k=retrieval_config.rrf_k,
             fts_weight=retrieval_config.rrf_weight_fts,
@@ -2324,15 +2331,23 @@ def _hash_chunk_uids(chunks: Sequence[GenerationChunk]) -> str:
 def _build_generation_chunks(
     results: Sequence[ChunkResult | HybridChunkResult],
     top_k: int,
+    *,
+    query: str,
+    generation_rerank: Literal["none", "lexical"],
 ) -> list[GenerationChunk]:
     """Build generation chunks from retrieval results.
 
     Args:
         results: Retrieved chunk results.
         top_k: Number of chunks to include.
+        query: User query text used for reranking.
+        generation_rerank: Rerank strategy for generation chunks.
     Returns:
         List of GenerationChunk entries.
     """
+
+    if generation_rerank == "lexical":
+        results = rerank_results_for_generation(query, results)
 
     return [
         GenerationChunk(

@@ -154,6 +154,35 @@ def test_search_fts_relaxes_query_when_strict_query_empty(tmp_path: Path) -> Non
     assert results[0].chunk_uid == "uid-3"
 
 
+def test_rerank_results_for_generation_promotes_overlap() -> None:
+    retrieve = _load_retrieve_module()
+    results = [
+        retrieve.ChunkResult(
+            chunk_uid="uid-1",
+            chunk_id=1,
+            paper_id="2312.10997",
+            page_number=5,
+            text="Sparse retrieval uses BM25 ranking.",
+            score=0.1,
+        ),
+        retrieve.ChunkResult(
+            chunk_uid="uid-2",
+            chunk_id=2,
+            paper_id="2312.10997",
+            page_number=3,
+            text="Dense retrieval uses embeddings for search.",
+            score=0.2,
+        ),
+    ]
+
+    reranked = retrieve.rerank_results_for_generation(
+        "dense retrieval embeddings",
+        results,
+    )
+
+    assert reranked[0].chunk_uid == "uid-2"
+
+
 def test_format_snippet_truncates() -> None:
     retrieve = _load_retrieve_module()
     snippet = retrieve.format_snippet("hello   world\nagain", 10)
