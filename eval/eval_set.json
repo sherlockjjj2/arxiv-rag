@@ -5,57 +5,33 @@
       "query": "When examining LIMA's performance, what observations can be made regarding its ability to generate responses without structure-oriented training examples?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "878e359ea2d04f8b9cd92c0f7ef27d826a3e1bdc"
-        ],
-        "papers": [
-          "2305.11206"
-        ],
-        "pages": [
-          [
-            12
-          ]
-        ],
+        "chunk_uids": ["878e359ea2d04f8b9cd92c0f7ef27d826a3e1bdc"],
+        "papers": ["2305.11206"],
+        "pages": [[12]],
         "expected_topics": []
       },
       "reference_answer": "LIMA struggles to generate proper answers without structure-oriented training examples, as demonstrated in the left column of the provided examples. However, it can produce remarkably complex responses, such as a marketing plan, despite the absence of specific examples in the training data, as seen in the right column."
     },
     {
       "query_id": "q002",
-      "query": "How does the research on scaling laws for autoregressive generative modeling relate to the advancements made in GPT-NeoX-20B?",
+      "query": "What is the implication of initializing the model to the pre-trained model for MRPC, RTE, and STS-B instead of a model already adapted to MNLI?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "a277833d2f51fbcd818dfa8b7facf598d6fc97fc"
-        ],
-        "papers": [
-          "2204.06745"
-        ],
-        "pages": [
-          [
-            13
-          ]
-        ],
+        "chunk_uids": ["ab53ddaa89704c1c5148caa4e0d60adfb1cd1783"],
+        "papers": ["2106.09685"],
+        "pages": [[7]],
         "expected_topics": []
       },
-      "reference_answer": "The research on scaling laws for autoregressive generative modeling provides a theoretical foundation that informs the design and capabilities of GPT-NeoX-20B. By understanding how model performance improves with scale, the developers of GPT-NeoX-20B can optimize its architecture and training strategies to achieve better language understanding and generation."
+      "reference_answer": "Initializing the model to the pre-trained model for MRPC, RTE, and STS-B allows for a more controlled comparison with the adapter baselines, ensuring that the performance metrics are not skewed by prior adaptations. This restricted setup helps in evaluating the effectiveness of LoRA in a fairer context."
     },
     {
       "query_id": "q003",
       "query": "When would it be beneficial to use a set-centric instruction set architecture for graph mining?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "a7ee0a515dab6eb2381fd237b3226f660edba50b"
-        ],
-        "papers": [
-          "2308.09687"
-        ],
-        "pages": [
-          [
-            11
-          ]
-        ],
+        "chunk_uids": ["a7ee0a515dab6eb2381fd237b3226f660edba50b"],
+        "papers": ["2308.09687"],
+        "pages": [[11]],
         "expected_topics": []
       },
       "reference_answer": "It would be beneficial to use a set-centric instruction set architecture for graph mining in scenarios where processing-in-memory systems are employed, as this architecture is designed to optimize graph mining tasks by improving efficiency and performance in handling large datasets."
@@ -65,17 +41,9 @@
       "query": "What trade-off is suggested by the hierarchical nature of community structure in generating answers to user queries?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "7707d4655e9a455a1eb65daa70f85d50065df03e"
-        ],
-        "papers": [
-          "2404.16130"
-        ],
-        "pages": [
-          [
-            6
-          ]
-        ],
+        "chunk_uids": ["7707d4655e9a455a1eb65daa70f85d50065df03e"],
+        "papers": ["2404.16130"],
+        "pages": [[6]],
         "expected_topics": []
       },
       "reference_answer": "The hierarchical nature of community structure suggests a trade-off between summary detail and scope for general sensemaking questions. This implies that different levels within the hierarchy may offer varying degrees of detail and coverage, impacting the effectiveness of the answers generated."
@@ -85,17 +53,9 @@
       "query": "What is the implication of initializing the model to the pre-trained model for MRPC, RTE, and STS-B instead of a model already adapted to MNLI?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "ab53ddaa89704c1c5148caa4e0d60adfb1cd1783"
-        ],
-        "papers": [
-          "2106.09685"
-        ],
-        "pages": [
-          [
-            7
-          ]
-        ],
+        "chunk_uids": ["ab53ddaa89704c1c5148caa4e0d60adfb1cd1783"],
+        "papers": ["2106.09685"],
+        "pages": [[7]],
         "expected_topics": []
       },
       "reference_answer": "Initializing the model to the pre-trained version for MRPC, RTE, and STS-B, rather than one adapted to MNLI, implies that the results may reflect a more foundational performance metric for LoRA. This could lead to insights about how well LoRA adapts to different tasks when not starting from a pre-adapted state, highlighting its versatility across varied datasets."
@@ -105,17 +65,9 @@
       "query": "To what extent does the performance of the best-performing CLIP model reflect the advantages of natural language supervision compared to traditional pre-training approaches?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "67910b9a5a679dafa5a965b26b658cdf37f808c4"
-        ],
-        "papers": [
-          "2103.00020"
-        ],
-        "pages": [
-          [
-            38
-          ]
-        ],
+        "chunk_uids": ["67910b9a5a679dafa5a965b26b658cdf37f808c4"],
+        "papers": ["2103.00020"],
+        "pages": [[38]],
         "expected_topics": []
       },
       "reference_answer": "The best-performing CLIP model, utilizing the ViT-L/14 architecture, achieved state-of-the-art results in 21 out of 27 datasets. This significant performance indicates that natural language supervision provides a distinct advantage over traditional image classification-based pre-training methods."
@@ -125,57 +77,33 @@
       "query": "How does the size of the text encoder impact the performance of Imagen in terms of image fidelity and image-text alignment?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "8a0b3115175fa6035538dbfb30c4657eae842719"
-        ],
-        "papers": [
-          "2205.11487"
-        ],
-        "pages": [
-          [
-            7
-          ]
-        ],
+        "chunk_uids": ["8a0b3115175fa6035538dbfb30c4657eae842719"],
+        "papers": ["2205.11487"],
+        "pages": [[7]],
         "expected_topics": []
       },
       "reference_answer": "Scaling the size of the text encoder is extremely effective, leading to consistent improvement in both image-text alignment and image fidelity. Specifically, Imagen trained with the largest text encoder, T5-XXL, which has 4.6 billion parameters, yields the best results."
     },
     {
       "query_id": "q008",
-      "query": "What distinguishes the works of Gehrmann et al. from those of Gebru et al. in terms of their contributions to understanding neural networks?",
+      "query": "To what extent do the results demonstrate the effectiveness of natural language supervision compared to traditional pre-training approaches?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "a5497c3ddf62f0739e70876fb2f408465a7d6fa3"
-        ],
-        "papers": [
-          "2204.02311"
-        ],
-        "pages": [
-          [
-            54
-          ]
-        ],
+        "chunk_uids": ["67910b9a5a679dafa5a965b26b658cdf37f808c4"],
+        "papers": ["2103.00020"],
+        "pages": [[38]],
         "expected_topics": []
       },
-      "reference_answer": "Gehrmann et al. focus on evaluating neural toxic degeneration in language models, specifically through the Realtoxicityprompts framework, which examines the toxicity in generated language. In contrast, Gebru et al. emphasize the importance of datasheets for datasets, advocating for transparency and accountability in dataset usage for machine learning, highlighting different aspects of ethical considerations in AI."
+      "reference_answer": "The results indicate that the CLIP model, leveraging natural language supervision, outperformed traditional pre-training approaches on many datasets. Specifically, it achieved state-of-the-art results in 21 of the 27 datasets tested, highlighting a significant advantage over other models that rely solely on image classification for pre-training."
     },
     {
       "query_id": "q009",
       "query": "In which case might the model's clean score suggest overfitting to seen examples?",
       "difficulty": "factual",
       "ground_truth": {
-        "chunk_uids": [
-          "0c12f1a328f7e0b7b85fab8e94d77257868aba9e"
-        ],
-        "papers": [
-          "2005.14165"
-        ],
-        "pages": [
-          [
-            44
-          ]
-        ],
+        "chunk_uids": ["0c12f1a328f7e0b7b85fab8e94d77257868aba9e"],
+        "papers": ["2005.14165"],
+        "pages": [[44]],
         "expected_topics": []
       },
       "reference_answer": "If the clean score is more than 1% or 2% worse than the overall score, it suggests the model may have overfit to the examples it has seen."
@@ -185,57 +113,33 @@
       "query": "What drawback does the AlphaCode 2 agent address compared to its predecessor in terms of competitive programming performance?",
       "difficulty": "factual",
       "ground_truth": {
-        "chunk_uids": [
-          "09305a24f52bd403966b138a8959ddcbde454527"
-        ],
-        "papers": [
-          "2312.11805"
-        ],
-        "pages": [
-          [
-            2
-          ]
-        ],
+        "chunk_uids": ["09305a24f52bd403966b138a8959ddcbde454527"],
+        "papers": ["2312.11805"],
+        "pages": [[2]],
         "expected_topics": []
       },
       "reference_answer": "AlphaCode 2 addresses the drawback of lower performance by ranking within the top 15% of entrants on the Codeforces platform, which is a significant improvement over its predecessor, which ranked in the top 50%."
     },
     {
       "query_id": "q011",
-      "query": "What does this imply about the challenges of using LaMDA for dialog applications?",
+      "query": "What distinguishes the SpanBERT approach from traditional BERT models in terms of its pre-training objectives?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "8f9c1da475ab8d1087051b9f2f99d6dae14e7356"
-        ],
-        "papers": [
-          "2201.08239"
-        ],
-        "pages": [
-          [
-            15
-          ]
-        ],
+        "chunk_uids": ["6e089bc71743b8b0289bb21dd68ab11392f248ff"],
+        "papers": ["1907.11692"],
+        "pages": [[11]],
         "expected_topics": []
       },
-      "reference_answer": "The challenges of using LaMDA for dialog applications include the model's tendency to revert to common training data representations, which can result in less relevant responses, particularly when context is not well-defined. Additionally, a significant portion of responses (30% for Mount Everest) could not be attributed to known sources, indicating limitations in groundedness and helpfulness."
+      "reference_answer": "SpanBERT improves pre-training by specifically representing and predicting spans of text rather than just individual tokens. This allows it to better understand the relationships between different parts of the text, enhancing its performance on tasks that require span-level information."
     },
     {
       "query_id": "q012",
       "query": "What factors contribute to the challenges of extending context length in transformers?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "9fd8e365a9a2f11a7c99100dc8349d72a2d9470f"
-        ],
-        "papers": [
-          "2310.08560"
-        ],
-        "pages": [
-          [
-            1
-          ]
-        ],
+        "chunk_uids": ["9fd8e365a9a2f11a7c99100dc8349d72a2d9470f"],
+        "papers": ["2310.08560"],
+        "pages": [[1]],
         "expected_topics": []
       },
       "reference_answer": "The challenges of extending context length in transformers are due to the quadratic increase in computational time and memory cost associated with the self-attention mechanism. Additionally, long-context models have been shown to struggle in effectively utilizing additional context, creating a need for alternative techniques."
@@ -245,17 +149,9 @@
       "query": "Why is the ability of InstructGPT to follow instructions in various languages significant compared to GPT-3?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "53ab4b1c616e7db48169da06464e8dae4e357349"
-        ],
-        "papers": [
-          "2203.02155"
-        ],
-        "pages": [
-          [
-            4
-          ]
-        ],
+        "chunk_uids": ["53ab4b1c616e7db48169da06464e8dae4e357349"],
+        "papers": ["2203.02155"],
+        "pages": [[4]],
         "expected_topics": []
       },
       "reference_answer": "InstructGPT's ability to follow instructions in various languages is significant because it indicates a generalization of the concept of 'following instructions,' showing that it can perform tasks with little direct supervision. In contrast, GPT-3 requires more careful prompting and does not typically follow instructions in these domains."
@@ -265,17 +161,9 @@
       "query": "In comparison to the performance of ZeroQuant, how does SmoothQuant maintain the accuracy of the OPT-175B model after quantization?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "4d6a3268bf73ac9334e6ebb6f6f89440a6d5d687"
-        ],
-        "papers": [
-          "2211.10438"
-        ],
-        "pages": [
-          [
-            6
-          ]
-        ],
+        "chunk_uids": ["4d6a3268bf73ac9334e6ebb6f6f89440a6d5d687"],
+        "papers": ["2211.10438"],
+        "pages": [[6]],
         "expected_topics": []
       },
       "reference_answer": "SmoothQuant maintains the accuracy of the OPT-175B model after INT8 quantization by achieving higher average accuracy across various benchmarks compared to ZeroQuant, which fails to prevent accuracy degradation despite its own quantization strategy."
@@ -285,17 +173,9 @@
       "query": "Under what conditions can GPTQ outperform RTN in zero-shot tasks for the BLOOM model with 1.7B bits?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "e0bd30c4c8f8a704b903b5b6df4fd019dfd86c1b"
-        ],
-        "papers": [
-          "2210.17323"
-        ],
-        "pages": [
-          [
-            15
-          ]
-        ],
+        "chunk_uids": ["e0bd30c4c8f8a704b903b5b6df4fd019dfd86c1b"],
+        "papers": ["2210.17323"],
+        "pages": [[15]],
         "expected_topics": []
       },
       "reference_answer": "GPTQ can outperform RTN in zero-shot tasks for the BLOOM model with 1.7B bits when the accuracy metrics are compared; GPTQ achieves an accuracy of 46.28 while RTN only reaches 41.92, demonstrating a clear advantage in this scenario."
@@ -305,17 +185,9 @@
       "query": "What limitation does the Country211 dataset address regarding visual representations?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "09e94918d14a97c5a706581b80fa54c127357578"
-        ],
-        "papers": [
-          "2103.00020"
-        ],
-        "pages": [
-          [
-            37
-          ]
-        ],
+        "chunk_uids": ["09e94918d14a97c5a706581b80fa54c127357578"],
+        "papers": ["2103.00020"],
+        "pages": [[37]],
         "expected_topics": []
       },
       "reference_answer": "The Country211 dataset is designed to assess the geolocation capability of visual representations by filtering the YFCC100m dataset to include only 211 countries that have at least 300 photos with GPS coordinates. This limitation focuses on evaluating how well visual models can identify locations based on image content."
@@ -325,17 +197,9 @@
       "query": "What does this suggest about the transition from Penn Treebank to the new language modeling dataset?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "c0f023676a734b1026c1b54e473721cce85a7c22"
-        ],
-        "papers": [
-          "1609.07843"
-        ],
-        "pages": [
-          [
-            9
-          ]
-        ],
+        "chunk_uids": ["c0f023676a734b1026c1b54e473721cce85a7c22"],
+        "papers": ["1609.07843"],
+        "pages": [[9]],
         "expected_topics": []
       },
       "reference_answer": "The transition from Penn Treebank to a new language modeling dataset, specifically WikiText-2 and WikiText-103, suggests a need for better handling of long-range dependencies and rare words in language modeling. This change aims to improve the overall effectiveness of language models in understanding complex language structures."
@@ -345,17 +209,9 @@
       "query": "What role does paragraph-level rationale extraction play in understanding European Court of Human Rights cases?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "0c97797994b7c1e7de19e13d42c8c14b750bc11e"
-        ],
-        "papers": [
-          "2205.14135"
-        ],
-        "pages": [
-          [
-            11
-          ]
-        ],
+        "chunk_uids": ["0c97797994b7c1e7de19e13d42c8c14b750bc11e"],
+        "papers": ["2205.14135"],
+        "pages": [[11]],
         "expected_topics": []
       },
       "reference_answer": "Paragraph-level rationale extraction helps in systematically analyzing the reasoning behind judicial decisions in European Court of Human Rights cases, thereby enhancing the interpretability and transparency of legal judgments. This approach utilizes regularization techniques to improve the extraction process, which can provide insights into how legal arguments are structured and evaluated."
@@ -365,57 +221,33 @@
       "query": "What factors may contribute to the performance difference between LLaMA-65B and models like Chinchilla-70B and PaLM-540B on the MMLU benchmark?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "d4e3b8d804fe16dce2944fa3676adb27df36874b"
-        ],
-        "papers": [
-          "2302.13971"
-        ],
-        "pages": [
-          [
-            6
-          ]
-        ],
+        "chunk_uids": ["d4e3b8d804fe16dce2944fa3676adb27df36874b"],
+        "papers": ["2302.13971"],
+        "pages": [[6]],
         "expected_topics": []
       },
       "reference_answer": "The performance difference may be attributed to the limited amount of pre-training data used for LLaMA-65B, which consists of only 177GB from sources like ArXiv, Gutenberg, and Books3. In contrast, Chinchilla-70B and PaLM-540B were trained on up to 2TB of books, providing them with a broader knowledge base and potentially leading to their superior performance on the MMLU benchmark."
     },
     {
       "query_id": "q020",
-      "query": "In what way do the results of the Chain of Thought prompting compare to the Standard performance across different models?",
+      "query": "What drawback is associated with the overlap metric used in evaluating language models, particularly for datasets with background information?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "53a2c4790d0b01ac5735e3d0f3bc210ed58f3c12"
-        ],
-        "papers": [
-          "2201.11903"
-        ],
-        "pages": [
-          [
-            20
-          ]
-        ],
+        "chunk_uids": ["0c12f1a328f7e0b7b85fab8e94d77257868aba9e"],
+        "papers": ["2005.14165"],
+        "pages": [[44]],
         "expected_topics": []
       },
-      "reference_answer": "The Chain of Thought prompting significantly improves performance across various models when compared to their Standard performance. For example, LaMDA 137B shows an increase of 14.3 in one metric, GPT-3 175B has a notable improvement of 31.3, and Codex demonstrates an increase of 43.4, indicating a consistent trend of enhanced reasoning abilities with this prompting method."
+      "reference_answer": "The overlap metric tends to show a high rate of false positives for datasets that contain background information drawn from the web, such as SQuAD. This can mislead the evaluation as it may inaccurately suggest that the model has overfitted to the training data."
     },
     {
       "query_id": "q021",
       "query": "In what situation does MASS demonstrate superior performance compared to BERT+LM and DAE?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "0cd1c72f9af46a33d191bd58218ce28562b0c40c"
-        ],
-        "papers": [
-          "1905.02450"
-        ],
-        "pages": [
-          [
-            6
-          ]
-        ],
+        "chunk_uids": ["0cd1c72f9af46a33d191bd58218ce28562b0c40c"],
+        "papers": ["1905.02450"],
+        "pages": [[6]],
         "expected_topics": []
       },
       "reference_answer": "MASS demonstrates superior performance in all unsupervised translation tasks when compared to BERT+LM and DAE, as indicated by higher BLEU scores across the evaluated language pairs."
@@ -425,17 +257,9 @@
       "query": "What constraint affects the deployment of PaLM-Coder in software development?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "a29dfc845da87b7805ccd3b500cc83ebf85bd03f"
-        ],
-        "papers": [
-          "2204.02311"
-        ],
-        "pages": [
-          [
-            47
-          ]
-        ],
+        "chunk_uids": ["a29dfc845da87b7805ccd3b500cc83ebf85bd03f"],
+        "papers": ["2204.02311"],
+        "pages": [[47]],
         "expected_topics": []
       },
       "reference_answer": "The deployment of PaLM-Coder is complicated by ethical considerations and the need to ensure that language model-based suggestions are correct, robust, safe, and secure, while also building developer confidence in these properties."
@@ -445,17 +269,9 @@
       "query": "What follows from the main limitation of PEFT frameworks when compared to the ReFT framework?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "d41466498a0ef7d6b54684c2ff535164ac9a1acb"
-        ],
-        "papers": [
-          "2404.03592"
-        ],
-        "pages": [
-          [
-            20
-          ]
-        ],
+        "chunk_uids": ["d41466498a0ef7d6b54684c2ff535164ac9a1acb"],
+        "papers": ["2404.03592"],
+        "pages": [[20]],
         "expected_topics": []
       },
       "reference_answer": "The main limitation of PEFT frameworks is that they lack the notion of time or sequence, which means representation modifications are applied to every token in the sequence. In contrast, ReFT can intervene on a small number of representations over time, allowing for more targeted and effective modifications."
@@ -465,17 +281,9 @@
       "query": "What explains the relationship between training data size and model performance for PopQA, PubHealth, and ASQA?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "a541ded42ec6fb6db67985c79c2e2a79772789e7"
-        ],
-        "papers": [
-          "2310.11511"
-        ],
-        "pages": [
-          [
-            10
-          ]
-        ],
+        "chunk_uids": ["a541ded42ec6fb6db67985c79c2e2a79772789e7"],
+        "papers": ["2310.11511"],
+        "pages": [[10]],
         "expected_topics": []
       },
       "reference_answer": "The relationship is characterized by an analysis where the performance of models trained on varying sizes of data is compared. Specifically, as the number of training instances increases from 5k to 150k, the models' performance on PopQA, PubHealth, and ASQA improves, demonstrating that larger training datasets lead to better outcomes."
@@ -485,57 +293,33 @@
       "query": "Compared to the ReAct-only approach, how does ReAct + Reflexion improve task completion?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "763f86316221106dd975b6ff84631e683af015c1"
-        ],
-        "papers": [
-          "2303.11366"
-        ],
-        "pages": [
-          [
-            5
-          ]
-        ],
+        "chunk_uids": ["763f86316221106dd975b6ff84631e683af015c1"],
+        "papers": ["2303.11366"],
+        "pages": [[5]],
         "expected_topics": []
       },
       "reference_answer": "ReAct + Reflexion significantly outperforms the ReAct-only approach by completing 130 out of 134 tasks, utilizing a heuristic to detect hallucinations and inefficient planning, whereas the ReAct-only method sees a performance increase halt between trials 6 and 7."
     },
     {
       "query_id": "q026",
-      "query": "What mechanism contributes to the improved performance of DeBERTa models compared to the base RoBERTa model on the GLUE development set?",
+      "query": "When would combining probabilistic set representations with graph mining techniques be most beneficial?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "3b1d4d8247c30258baaca656488a5947f8bff159"
-        ],
-        "papers": [
-          "2006.03654"
-        ],
-        "pages": [
-          [
-            19
-          ]
-        ],
+        "chunk_uids": ["a7ee0a515dab6eb2381fd237b3226f660edba50b"],
+        "papers": ["2308.09687"],
+        "pages": [[11]],
         "expected_topics": []
       },
-      "reference_answer": "The DeBERTa models show improved performance due to their larger parameter sizes and the implementation of additional modifications, such as ShareProjection and Conv layers, which enhance their accuracy and F1 scores across various tasks."
+      "reference_answer": "Combining probabilistic set representations with graph mining techniques would be most beneficial when aiming to achieve high performance and accuracy in analyzing complex data structures, particularly in scenarios involving large-scale datasets where traditional methods may fall short."
     },
     {
       "query_id": "q027",
       "query": "Why is the surrogate attention operator significant in the context of the convolutional language model described?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "aa49a59eed40f82f45aabe98603a81db6f5143b1"
-        ],
-        "papers": [
-          "2302.10866"
-        ],
-        "pages": [
-          [
-            23
-          ]
-        ],
+        "chunk_uids": ["aa49a59eed40f82f45aabe98603a81db6f5143b1"],
+        "papers": ["2302.10866"],
+        "pages": [[23]],
         "expected_topics": []
       },
       "reference_answer": "The surrogate attention operator is significant because it allows for the transformation of input signals into outputs by conditioning on the query, key, and filters. This operator encapsulates the relationship between the input and output, enabling more complex interactions in the model's architecture, which is crucial for improving performance in language tasks."
@@ -545,17 +329,9 @@
       "query": "What distinguishes RAG models from BART in terms of factual accuracy and diversity in generated answers?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "963f60bafea8dc50b83d4cee307c1816de2c0b9b"
-        ],
-        "papers": [
-          "2005.11401"
-        ],
-        "pages": [
-          [
-            6
-          ]
-        ],
+        "chunk_uids": ["963f60bafea8dc50b83d4cee307c1816de2c0b9b"],
+        "papers": ["2005.11401"],
+        "pages": [[6]],
         "expected_topics": []
       },
       "reference_answer": "RAG models are found to hallucinate less and generate factually correct text more often than BART. Additionally, RAG generations are more diverse compared to those from BART, highlighting their superiority in both factual accuracy and answer diversity."
@@ -565,17 +341,9 @@
       "query": "In what situation is the effectiveness of the MASS model particularly verified?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "e535e4e0f19a66229e52bcbc1570c5e27c05ad63"
-        ],
-        "papers": [
-          "1905.02450"
-        ],
-        "pages": [
-          [
-            5
-          ]
-        ],
+        "chunk_uids": ["e535e4e0f19a66229e52bcbc1570c5e27c05ad63"],
+        "papers": ["1905.02450"],
+        "pages": [[5]],
         "expected_topics": []
       },
       "reference_answer": "The effectiveness of the MASS model is particularly verified in the context of low-resource languages, as it includes Romanian in the pre-training stage to assess how well it performs with low-resource monolingual data."
@@ -585,17 +353,9 @@
       "query": "What drawback does the approach in Llama 3 face compared to other multimodal models, specifically in handling video inputs?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "43f23a720868327afae68dfd89a3dfa632e602e5"
-        ],
-        "papers": [
-          "2407.21783"
-        ],
-        "pages": [
-          [
-            70
-          ]
-        ],
+        "chunk_uids": ["43f23a720868327afae68dfd89a3dfa632e602e5"],
+        "papers": ["2407.21783"],
+        "pages": [[70]],
         "expected_topics": []
       },
       "reference_answer": "The approach in Llama 3, while adopting an adapter approach to align video and language representations, is situated in a body of work that is not that large compared to the extensive studies on image-text pairs. This limitation may impact the effectiveness of Llama 3 in joint modeling of videos and language."
@@ -605,17 +365,9 @@
       "query": "What is the implication of using FLOPs as a measure for compute usage in model evaluation?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "2d46e7ef8228ac6e124a39fcfe8057cecd9b70f3"
-        ],
-        "papers": [
-          "2003.10555"
-        ],
-        "pages": [
-          [
-            16
-          ]
-        ],
+        "chunk_uids": ["2d46e7ef8228ac6e124a39fcfe8057cecd9b70f3"],
+        "papers": ["2003.10555"],
+        "pages": [[16]],
         "expected_topics": []
       },
       "reference_answer": "Using FLOPs as a measure for compute usage allows for an assessment that is independent of specific hardware and low-level optimizations. However, this approach may overlook critical hardware-centered optimizations that can significantly impact a model's performance, as demonstrated by ALBERT's design enhancements."
@@ -625,17 +377,9 @@
       "query": "What explains the structure of the autoregressive blank infilling objective in the pretraining process?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "6abbad06d7deb557420c6932092f5760f87083ec"
-        ],
-        "papers": [
-          "2103.10360"
-        ],
-        "pages": [
-          [
-            2
-          ]
-        ],
+        "chunk_uids": ["6abbad06d7deb557420c6932092f5760f87083ec"],
+        "papers": ["2103.10360"],
+        "pages": [[2]],
         "expected_topics": []
       },
       "reference_answer": "The autoregressive blank infilling objective is structured such that the input is divided into two parts: Part A, which contains the corrupted text, and Part B, consisting of masked spans. In this setup, tokens in Part A can attend to each other but not to tokens in Part B, while tokens in Part B can attend to Part A and their antecedents in Part B but not to subsequent tokens in Part B."
@@ -645,17 +389,9 @@
       "query": "What differences were observed in the descriptive words used for males and females in the study?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "b0483a5851b79d160f9e7847a6db5df55c4a702b"
-        ],
-        "papers": [
-          "2005.14165"
-        ],
-        "pages": [
-          [
-            37
-          ]
-        ],
+        "chunk_uids": ["b0483a5851b79d160f9e7847a6db5df55c4a702b"],
+        "papers": ["2005.14165"],
+        "pages": [[37]],
         "expected_topics": []
       },
       "reference_answer": "Females were more often described using appearance-oriented words such as 'beautiful' and 'gorgeous', while males were described using adjectives that span a greater spectrum. This indicates a bias in the language model towards gendered descriptions."
@@ -665,17 +401,9 @@
       "query": "Compared to the generated solution, how does the ground truth solution for the problem involving positive real numbers a and b differ in its approach to finding the minimum value of a2+b2/a\u2212b?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "6136705384102d53de258ce3ac04a8f4bd2a047f"
-        ],
-        "papers": [
-          "2103.03874"
-        ],
-        "pages": [
-          [
-            7
-          ]
-        ],
+        "chunk_uids": ["6136705384102d53de258ce3ac04a8f4bd2a047f"],
+        "papers": ["2103.03874"],
+        "pages": [[7]],
         "expected_topics": []
       },
       "reference_answer": "The ground truth solution uses the identity a2+b2/a\u2212b = (a\u2212b)2+16/a\u2212b and applies the AM-GM inequality, which leads to a minimum value of 8. In contrast, the generated solution relies on the QM-AM inequality to establish a lower bound but does not achieve the actual minimum."
@@ -685,17 +413,9 @@
       "query": "When would DecPO be preferred over DPO in terms of model performance?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "925dd2cc9c0339b3075bdab254a4ce35b06e7523"
-        ],
-        "papers": [
-          "2406.17969"
-        ],
-        "pages": [
-          [
-            7
-          ]
-        ],
+        "chunk_uids": ["925dd2cc9c0339b3075bdab254a4ce35b06e7523"],
+        "papers": ["2406.17969"],
+        "pages": [[7]],
         "expected_topics": []
       },
       "reference_answer": "DecPO would be preferred over DPO particularly when addressing issues of overfitting, as it enhances performance more effectively across datasets. While DPO can be inferior to other methods like SFT in specific cases, DecPO consistently shows superior performance and robustness."
@@ -705,17 +425,9 @@
       "query": "What trade-off does the introduction of DSPy present in terms of using pretrained LMs versus building more complex systems?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "ee93e244af462f97e9d77bfbabddba9232ce6d44"
-        ],
-        "papers": [
-          "2310.03714"
-        ],
-        "pages": [
-          [
-            11
-          ]
-        ],
+        "chunk_uids": ["ee93e244af462f97e9d77bfbabddba9232ce6d44"],
+        "papers": ["2310.03714"],
+        "pages": [[11]],
         "expected_topics": []
       },
       "reference_answer": "The introduction of DSPy allows for the rapid development of highly effective systems using relatively small LMs, suggesting a trade-off between leveraging existing pretrained models and the potential for creating more sophisticated systems through the construction of text transformation graphs."
@@ -725,17 +437,9 @@
       "query": "What does this imply about the limitations of traditional Linux shell interactions for LM agents?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "683eec81eb33499eed2926cb592a9b310980f65f"
-        ],
-        "papers": [
-          "2405.15793"
-        ],
-        "pages": [
-          [
-            2
-          ]
-        ],
+        "chunk_uids": ["683eec81eb33499eed2926cb592a9b310980f65f"],
+        "papers": ["2405.15793"],
+        "pages": [[2]],
         "expected_topics": []
       },
       "reference_answer": "Traditional Linux shell interactions present limitations for LM agents, as they struggle to perform actions like editing files and do not provide feedback on invalid edits. This lack of reliability and feedback hampers performance, which necessitates the development of an agent-computer interface (ACI) to enhance their capabilities."
@@ -745,17 +449,9 @@
       "query": "What role does the GLEU score play in evaluating neural translation models compared to the BLEU score?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "57c60bf2f162c8192df358c1bea821da9e7ea23e"
-        ],
-        "papers": [
-          "1609.08144"
-        ],
-        "pages": [
-          [
-            8
-          ]
-        ],
+        "chunk_uids": ["57c60bf2f162c8192df358c1bea821da9e7ea23e"],
+        "papers": ["1609.08144"],
+        "pages": [[8]],
         "expected_topics": []
       },
       "reference_answer": "The GLEU score is used to address the undesirable properties of the BLEU score when evaluating single sentences, as BLEU was designed for corpus-level assessment. GLEU computes the minimum of recall and precision based on n-grams in both output and target sequences, providing a range from 0 to 1, and is symmetrical when comparing output and target."
@@ -765,17 +461,9 @@
       "query": "How did the synchronous nature of training affect the fault tolerance of the Llama 3 model?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "53b81caaceccb28d4f4ea40ce45de872a2159d9a"
-        ],
-        "papers": [
-          "2407.21783"
-        ],
-        "pages": [
-          [
-            13
-          ]
-        ],
+        "chunk_uids": ["53b81caaceccb28d4f4ea40ce45de872a2159d9a"],
+        "papers": ["2407.21783"],
+        "pages": [[13]],
         "expected_topics": []
       },
       "reference_answer": "The synchronous nature of training made it less fault-tolerant, meaning that a single GPU failure could require a restart of the entire job. This increased the likelihood of interruptions during the training process."
@@ -785,17 +473,9 @@
       "query": "In comparison to traditional machine translation methods, what advantages does the RNN encoder-decoder model provide in terms of learning phrase representations?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "390a932cd6e5a524021aba2ca0fc31303ec66110"
-        ],
-        "papers": [
-          "1609.08144"
-        ],
-        "pages": [
-          [
-            20
-          ]
-        ],
+        "chunk_uids": ["390a932cd6e5a524021aba2ca0fc31303ec66110"],
+        "papers": ["1609.08144"],
+        "pages": [[20]],
         "expected_topics": []
       },
       "reference_answer": "The RNN encoder-decoder model improves upon traditional methods by learning more effective phrase representations, allowing for better handling of language nuances and context. This results in translations that are more coherent and contextually appropriate compared to those generated by earlier statistical approaches."
@@ -805,17 +485,9 @@
       "query": "Under what conditions can the SWE-agent effectively navigate to find the implementation of the \u2018kind\u2018 property for the \u2018Derivative\u2018 class?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "b0084613c6f1c6417be23e8b4f4ea7592e1a247b"
-        ],
-        "papers": [
-          "2405.15793"
-        ],
-        "pages": [
-          [
-            90
-          ]
-        ],
+        "chunk_uids": ["b0084613c6f1c6417be23e8b4f4ea7592e1a247b"],
+        "papers": ["2405.15793"],
+        "pages": [[90]],
         "expected_topics": []
       },
       "reference_answer": "The SWE-agent can effectively navigate to find the implementation of the \u2018kind\u2018 property for the \u2018Derivative\u2018 class when it is in the relevant sections of the code related to differentiation or expression manipulation. As it scrolls down the \u2018function.py\u2018 file, the proximity to the relevant code increases as it identifies related functions like \u2018diff\u2018 and \u2018expand\u2018."
@@ -825,17 +497,9 @@
       "query": "What constraint is indicated by the hyperparameters listed in Table A9 regarding the models trained?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "e3bcd543522508d73b8c203e157337f0ad08653d"
-        ],
-        "papers": [
-          "2203.15556"
-        ],
-        "pages": [
-          [
-            36
-          ]
-        ],
+        "chunk_uids": ["e3bcd543522508d73b8c203e157337f0ad08653d"],
+        "papers": ["2203.15556"],
+        "pages": [[36]],
         "expected_topics": []
       },
       "reference_answer": "The hyperparameters listed in Table A9 indicate that various models were trained with specific configurations, including different learning rate schedules and varying numbers of training tokens, which suggests a systematic approach to optimizing model performance."
@@ -845,17 +509,9 @@
       "query": "What follows from the advancements made in weakly supervised pretraining as explored by the authors in their work?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "e0d5917e4c6d466a82b9ecd4c640462a05843622"
-        ],
-        "papers": [
-          "2407.21783"
-        ],
-        "pages": [
-          [
-            83
-          ]
-        ],
+        "chunk_uids": ["e0d5917e4c6d466a82b9ecd4c640462a05843622"],
+        "papers": ["2407.21783"],
+        "pages": [[83]],
         "expected_topics": []
       },
       "reference_answer": "The advancements in weakly supervised pretraining suggest that models can achieve improved performance by learning from less labeled data, potentially making training more efficient and accessible. This could lead to broader applications in various domains where labeled data is scarce."
@@ -865,17 +521,9 @@
       "query": "What mechanism led to the increased training intensity of Floyd Mayweather and Manny Pacquiao ahead of their fight?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "e589eb96a872c839ad7c4a0acf4984871dad15d4"
-        ],
-        "papers": [
-          "1909.08593"
-        ],
-        "pages": [
-          [
-            25
-          ]
-        ],
+        "chunk_uids": ["e589eb96a872c839ad7c4a0acf4984871dad15d4"],
+        "papers": ["1909.08593"],
+        "pages": [[25]],
         "expected_topics": []
       },
       "reference_answer": "The upcoming fight between Floyd Mayweather and Manny Pacquiao scheduled for May 2 has created a competitive atmosphere, motivating both boxers to intensify their training regimens in preparation for the clash."
@@ -885,17 +533,9 @@
       "query": "When considering the role of language models in action generation, how do they compare to traditional methods in text-based games?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "d8214877385121ba6aabb6d061b2c5f28a961718"
-        ],
-        "papers": [
-          "2210.03629"
-        ],
-        "pages": [
-          [
-            13
-          ]
-        ],
+        "chunk_uids": ["d8214877385121ba6aabb6d061b2c5f28a961718"],
+        "papers": ["2210.03629"],
+        "pages": [[13]],
         "expected_topics": []
       },
       "reference_answer": "Language models provide a more flexible and dynamic approach to action generation in text-based games compared to traditional methods, which may rely on pre-defined actions or limited decision trees. This adaptability allows for richer interactions and responses based on the evolving context of the game."
@@ -905,17 +545,9 @@
       "query": "How does the work of the Gemini Team on Gemini 1.5 contribute to multimodal understanding?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "f95afbe980e2392e9df1c0dbbbdf88008ac72eb0"
-        ],
-        "papers": [
-          "2412.15115"
-        ],
-        "pages": [
-          [
-            21
-          ]
-        ],
+        "chunk_uids": ["f95afbe980e2392e9df1c0dbbbdf88008ac72eb0"],
+        "papers": ["2412.15115"],
+        "pages": [[21]],
         "expected_topics": []
       },
       "reference_answer": "The Gemini Team's work on Gemini 1.5 enhances multimodal understanding by leveraging millions of tokens of context, which allows for more effective integration and processing of diverse types of information."
@@ -925,17 +557,9 @@
       "query": "In which case does the Gemini Ultra model demonstrate state-of-the-art performance?",
       "difficulty": "factual",
       "ground_truth": {
-        "chunk_uids": [
-          "f96cce11f0e8d921734a40e14ec63d6b679c4418"
-        ],
-        "papers": [
-          "2312.11805"
-        ],
-        "pages": [
-          [
-            4
-          ]
-        ],
+        "chunk_uids": ["f96cce11f0e8d921734a40e14ec63d6b679c4418"],
+        "papers": ["2312.11805"],
+        "pages": [[4]],
         "expected_topics": []
       },
       "reference_answer": "The Gemini Ultra model demonstrates state-of-the-art performance across a wide range of highly complex tasks, including reasoning and multimodal tasks."
@@ -945,17 +569,9 @@
       "query": "What limitation does the assumption of the FID being a unimodal function of the next time point impose on the multistep consistency sampling process?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "6b8f3374eeb89a4231f6019882a5d8df2f410d87"
-        ],
-        "papers": [
-          "2303.01469"
-        ],
-        "pages": [
-          [
-            4
-          ]
-        ],
+        "chunk_uids": ["6b8f3374eeb89a4231f6019882a5d8df2f410d87"],
+        "papers": ["2303.01469"],
+        "pages": [[4]],
         "expected_topics": []
       },
       "reference_answer": "The assumption that the FID is a unimodal function of the next time point may limit the ability to explore more complex relationships in the data, potentially restricting the optimization process to a narrower range of time points. This could lead to suboptimal sampling results, as it assumes a certain predictability in the relationship that may not always hold."
@@ -965,17 +581,9 @@
       "query": "What does this suggest about the evolution of reasoning capability in DeepSeek-R1-Zero during training?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "92e8ff65847f4b63d2eeba1b7762b2784bf126a6"
-        ],
-        "papers": [
-          "2501.12948"
-        ],
-        "pages": [
-          [
-            37
-          ]
-        ],
+        "chunk_uids": ["92e8ff65847f4b63d2eeba1b7762b2784bf126a6"],
+        "papers": ["2501.12948"],
+        "pages": [[37]],
         "expected_topics": []
       },
       "reference_answer": "The evolution of reasoning capability in DeepSeek-R1-Zero suggests that it demonstrates distinct learning patterns across different difficulty levels of the MATH dataset. While easy problems achieve high accuracy quickly and remain stable, the model shows remarkable improvement in difficult problems, indicating that it can enhance its reasoning ability as it learns more complex tasks."
@@ -985,17 +593,9 @@
       "query": "To what extent do the filtering methods impact the performance of the RedPajama-V2 dataset in terms of aggregated scores?",
       "difficulty": "synthesis",
       "ground_truth": {
-        "chunk_uids": [
-          "b1daf0ce4a8771800aca0a061a11eb4952c5afd5"
-        ],
-        "papers": [
-          "2411.12372"
-        ],
-        "pages": [
-          [
-            10
-          ]
-        ],
+        "chunk_uids": ["b1daf0ce4a8771800aca0a061a11eb4952c5afd5"],
+        "papers": ["2411.12372"],
+        "pages": [[10]],
         "expected_topics": []
       },
       "reference_answer": "The filtering methods significantly impact the performance of the RedPajama-V2 dataset, as seen from the results where fuzzy deduplication and Gopher rules yield the highest aggregated scores across all RPv2 datasets. Moreover, the average and normalized average benchmark scores of the filtered dataset are only second to RefinedWeb, indicating that filtering configurations can lead to vastly different model performances."

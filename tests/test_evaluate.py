@@ -349,8 +349,8 @@ def test_run_eval_uses_generated_answer_cache(
             [],
         )
 
-    def _fake_generate_answer(query, chunks, model="gpt-4o-mini"):
-        del query, chunks, model
+    def _fake_generate_answer(query, chunks, model="gpt-4o-mini", **kwargs):
+        del query, chunks, model, kwargs
         generation_calls["count"] += 1
         return "cached answer"
 
@@ -438,8 +438,8 @@ def test_run_eval_avoids_duplicate_generation_with_concurrency(
             [],
         )
 
-    def _fake_generate_answer(query, chunks, model="gpt-4o-mini"):
-        del query, chunks, model
+    def _fake_generate_answer(query, chunks, model="gpt-4o-mini", **kwargs):
+        del query, chunks, model, kwargs
         generation_calls["count"] += 1
         time.sleep(0.05)
         return "cached answer"

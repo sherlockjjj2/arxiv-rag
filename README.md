@@ -269,6 +269,10 @@ Notes:
 
 - `--generate` formats retrieved chunks into a citation prompt and returns a cited answer.
 - Use `--generation-rerank lexical` to rerank retrieved chunks before generation (lexical overlap + original rank).
+- Use `--generation-select-evidence` to run a lightweight evidence-selection step before answering; tune with `--generation-select-k` (default 3). This adds an extra model call.
+- Use `--generation-quote-first` to force quote-first generation anchored to a single chunk (adds an extra model call).
+- Use `--generation-cite-chunk-index` to emit `[chunk:N]` citations and map them to arXiv page citations post-generation.
+- Use `--generation-repair-citations` to repair missing or malformed citations; tune with `--generation-repair-max-attempts` (default 1). This adds extra model calls when triggered.
 - Generated answers apply a citation post-processing pass that remaps each citation to the best-supported retrieved `(paper_id, page_number)` using quote overlap.
 - `--verify` requires `--generate` and validates the generated answer only.
 - Default generation model is `gpt-4o-mini`; override with `--generate-model`.
@@ -330,6 +334,10 @@ Notes:
 - Failure modes distinguish `citation_absent` (no parsed citations) from `citation_zero_score` (citations present but none matched ground truth).
 - Eval reports include generation-context diagnostics for missing ground-truth chunks or citations outside the provided context.
 - Use `--generation-rerank lexical` with `eval-run --generate` to rerank chunks before generation.
+- Use `--generation-select-evidence` with `eval-run --generate` to force a smaller, model-selected evidence set; tune with `--generation-select-k`.
+- Use `--generation-quote-first` with `eval-run --generate` to anchor answers to a single quoted chunk.
+- Use `--generation-cite-chunk-index` with `eval-run --generate` to map chunk-index citations to page-level citations.
+- Use `--generation-repair-citations` to repair missing/malformed citations during eval generation.
 - Generation for `eval-run --generate` is concurrent by default (`--generation-concurrency 4`) to reduce wall-clock latency.
 - `eval-run` now uses a persistent SQLite cache by default at `eval/cache/eval_cache.db` for query embeddings and generated answers.
 - Use `--disable-cache` to force fresh API calls, or `--cache-db <path>` to override the cache location.
@@ -347,6 +355,15 @@ There is no dedicated `stats` CLI command yet. Use SQLite directly:
 ```bash
 sqlite3 data/arxiv_rag.db "SELECT COUNT(*) AS papers FROM papers; SELECT COUNT(*) AS chunks FROM chunks;"
 ```
+
+**Learning 2026-02-05**
+- Retrieval was not the bottleneck: recall/MRR stayed stable while citation accuracy moved.
+- Main accuracy drag was over-citation and wrong-page-within-paper, not missing ground truth in context.
+- Best config so far: `--generation-top-k 10` + `--generation-select-evidence` + `--generation-select-k 1` + `--generation-repair-citations` improved citation accuracy to ~0.76 and reduced over-citation sharply.
+- Enforcing exactly one citation per paragraph alone removed citation-absent cases but increased zero-score citations; not a net win by itself.
+- Quote-first generation and chunk-index citation mapping did not change metrics in the tested runs.
+- Model swaps were not a reliable lever: `gpt-4.1-mini` underperformed the baseline; `gpt-4.1` showed no clear improvement and hit rate limits.
+- For `gpt-4.1`, use low concurrency or batch runs; rate limiting is likely with selection/repair enabled.
 
 ## Data locations
 

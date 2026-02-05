@@ -705,6 +705,30 @@ def query(
         "none",
         help="Rerank retrieved chunks before generation.",
     ),
+    generation_select_evidence: bool = typer.Option(
+        False,
+        help="Select a smaller evidence set before generation.",
+    ),
+    generation_select_k: int = typer.Option(
+        3,
+        help="Max chunks to keep when evidence selection is enabled.",
+    ),
+    generation_quote_first: bool = typer.Option(
+        False,
+        help="Force quote-first generation anchored to one chunk.",
+    ),
+    generation_cite_chunk_index: bool = typer.Option(
+        False,
+        help="Use [chunk:N] citations and map to pages after generation.",
+    ),
+    generation_repair_citations: bool = typer.Option(
+        False,
+        help="Repair missing or invalid citations after generation.",
+    ),
+    generation_repair_max_attempts: int = typer.Option(
+        1,
+        help="Max attempts for citation repair when enabled.",
+    ),
     verify: bool = typer.Option(
         False,
         help="Verify citations and quotes in the generated answer.",
@@ -743,6 +767,19 @@ def query(
 
     if verify and not generate:
         typer.echo("--verify requires --generate.", err=True)
+        raise typer.Exit(code=1)
+    if generate and generation_select_k <= 0:
+        typer.echo("--generation-select-k must be > 0.", err=True)
+        raise typer.Exit(code=1)
+    if generate and generation_repair_max_attempts <= 0:
+        typer.echo("--generation-repair-max-attempts must be > 0.", err=True)
+        raise typer.Exit(code=1)
+    if generate and generation_cite_chunk_index and generation_quote_first:
+        typer.echo(
+            "--generation-cite-chunk-index cannot be combined with "
+            "--generation-quote-first.",
+            err=True,
+        )
         raise typer.Exit(code=1)
 
     start_time = time.perf_counter()
@@ -798,6 +835,12 @@ def query(
                 question,
                 chunks,
                 model=generate_model,
+                select_evidence=generation_select_evidence,
+                selection_max_chunks=generation_select_k,
+                quote_first=generation_quote_first,
+                cite_chunk_index=generation_cite_chunk_index,
+                repair_citations=generation_repair_citations,
+                repair_max_attempts=generation_repair_max_attempts,
             )
         except ValueError as exc:
             typer.echo(str(exc), err=True)
@@ -1157,6 +1200,30 @@ def eval_run(
         "none",
         help="Rerank retrieved chunks before generation.",
     ),
+    generation_select_evidence: bool = typer.Option(
+        False,
+        help="Select a smaller evidence set before generation.",
+    ),
+    generation_select_k: int = typer.Option(
+        3,
+        help="Max chunks to keep when evidence selection is enabled.",
+    ),
+    generation_quote_first: bool = typer.Option(
+        False,
+        help="Force quote-first generation anchored to one chunk.",
+    ),
+    generation_cite_chunk_index: bool = typer.Option(
+        False,
+        help="Use [chunk:N] citations and map to pages after generation.",
+    ),
+    generation_repair_citations: bool = typer.Option(
+        False,
+        help="Repair missing or invalid citations after generation.",
+    ),
+    generation_repair_max_attempts: int = typer.Option(
+        1,
+        help="Max attempts for citation repair when enabled.",
+    ),
     generation_concurrency: int = typer.Option(
         4,
         help="Maximum concurrent generation calls when --generate is enabled.",
@@ -1214,6 +1281,12 @@ def eval_run(
             generate_model=generate_model,
             generation_top_k=effective_generation_top_k,
             generation_rerank=generation_rerank,
+            generation_select_evidence=generation_select_evidence,
+            generation_select_k=generation_select_k,
+            generation_quote_first=generation_quote_first,
+            generation_cite_chunk_index=generation_cite_chunk_index,
+            generation_repair_citations=generation_repair_citations,
+            generation_repair_max_attempts=generation_repair_max_attempts,
             generation_concurrency=generation_concurrency,
             cache_db_path=None if disable_cache else cache_db,
         )

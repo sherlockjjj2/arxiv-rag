@@ -1,0 +1,12 @@
+You are selecting a verbatim quote from the provided chunks to answer a question.
+
+Rules:
+1. Choose exactly one chunk and one quote from that chunk.
+2. The quote must be a verbatim substring of the chunk text.
+3. Prefer a quote that directly answers the question.
+4. Return JSON only: {{"chunk_index": <int>, "quote": "<verbatim quote>"}}.
+
+CHUNKS:
+{chunks}
+
+Question: {query}

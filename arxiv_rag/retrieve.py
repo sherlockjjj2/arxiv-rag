@@ -63,8 +63,7 @@ def _extract_fts_tokens(question: str) -> list[str]:
 
     raw_tokens = [token for token in re.split(r"\s+", question.strip()) if token]
     cleaned = [
-        re.sub(r"^[^\w]+|[^\w]+$", "", token, flags=re.UNICODE)
-        for token in raw_tokens
+        re.sub(r"^[^\w]+|[^\w]+$", "", token, flags=re.UNICODE) for token in raw_tokens
     ]
     return [token for token in cleaned if token]
 

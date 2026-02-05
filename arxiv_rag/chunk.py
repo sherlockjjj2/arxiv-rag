@@ -418,9 +418,7 @@ def _iter_parsed_paths(paths: list[Path]) -> list[Path]:
             expanded.extend(sorted(path.glob("*.json")))
             continue
         if path.suffix.lower() != ".json":
-            raise ValueError(
-                f"--parsed expects JSON files or directories, got: {path}"
-            )
+            raise ValueError(f"--parsed expects JSON files or directories, got: {path}")
         expanded.append(path)
     return expanded
 

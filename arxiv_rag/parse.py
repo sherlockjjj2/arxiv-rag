@@ -150,10 +150,7 @@ def _summarize_mupdf_warnings() -> str | None:
     preview = "; ".join(filtered_lines[:preview_count])
     if len(filtered_lines) == preview_count:
         return f"MuPDF warnings: {preview}"
-    return (
-        f"MuPDF warnings: {preview} "
-        f"(+{len(filtered_lines) - preview_count} more)"
-    )
+    return f"MuPDF warnings: {preview} (+{len(filtered_lines) - preview_count} more)"
 
 
 def _is_low_risk_mupdf_warning(line: str) -> bool:
@@ -164,9 +161,7 @@ def _is_low_risk_mupdf_warning(line: str) -> bool:
     """
 
     normalized = line.strip().casefold()
-    return any(
-        pattern in normalized for pattern in _LOW_RISK_MUPDF_WARNING_PATTERNS
-    )
+    return any(pattern in normalized for pattern in _LOW_RISK_MUPDF_WARNING_PATTERNS)
 
 
 def _parse_pdf_with_warnings(
@@ -203,7 +198,9 @@ def _parse_pdf_with_warnings(
                     try:
                         page = doc.load_page(page_index)
                         text = page.get_text("text")
-                    except Exception as exc:  # pragma: no cover - PyMuPDF error types vary
+                    except (
+                        Exception
+                    ) as exc:  # pragma: no cover - PyMuPDF error types vary
                         warning = f"Skipped page {page_number}: {exc}"
                         warnings.append(warning)
                         LOGGER.warning(warning)
