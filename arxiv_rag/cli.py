@@ -35,9 +35,11 @@ from arxiv_rag.db import (
 from arxiv_rag.embeddings_client import EmbeddingsClient, EmbeddingsConfig
 from arxiv_rag.evaluate import (
     RetrievalConfig,
+    build_openings_plan,
     check_eval_set_coverage,
     generate_eval_set,
     load_eval_set,
+    load_openings_from_path,
     run_eval,
     save_eval_report,
 )
@@ -1003,8 +1005,12 @@ def eval_generate(
         help="Model for QA generation.",
     ),
     temperature: float = typer.Option(
-        0.2,
+        0.8,
         help="Sampling temperature.",
+    ),
+    top_p: float = typer.Option(
+        0.9,
+        help="Top-p nucleus sampling for QA generation.",
     ),
     max_output_tokens: int = typer.Option(
         800,
@@ -1022,6 +1028,10 @@ def eval_generate(
         None,
         help="Optional override for the QA prompt template.",
     ),
+    openings_path: Path | None = typer.Option(
+        None,
+        help="Optional path to a JSON list or newline-delimited openings list.",
+    ),
     corpus_version: str = typer.Option(
         "v1",
         help="Corpus version label to store in metadata.",
@@ -1031,6 +1041,11 @@ def eval_generate(
 
     logging.basicConfig(level=logging.INFO)
     try:
+        openings_plan = (
+            load_openings_from_path(openings_path)
+            if openings_path is not None
+            else build_openings_plan(n_questions, seed=seed)
+        )
         eval_set = generate_eval_set(
             db_path=db,
             output_path=output,
@@ -1040,11 +1055,13 @@ def eval_generate(
             min_chars=min_chars,
             model=model,
             temperature=temperature,
+            top_p=top_p,
             max_output_tokens=max_output_tokens,
             request_timeout_s=request_timeout_s,
             max_retries=max_retries,
             prompt_path=prompt_path,
             corpus_version=corpus_version,
+            openings_plan=openings_plan,
         )
     except (ValueError, FileNotFoundError) as exc:
         typer.echo(str(exc), err=True)

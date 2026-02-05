@@ -7,6 +7,7 @@ from arxiv_rag.evaluate import (
     CachedEmbeddingsClient,
     EvalCache,
     EvalFailureSummary,
+    GeneratedQuestion,
     EvalItemResult,
     EvalMetadata,
     EvalSet,
@@ -136,6 +137,68 @@ def test_render_report_markdown_includes_new_citation_fields() -> None:
     assert "Citation accuracy (Recall@5 > 0): 0.890" in rendered
     assert "Citation absent: 4" in rendered
     assert "Citation zero score: 12" in rendered
+
+
+def test_generated_question_validation_rejects_excerpt_reference() -> None:
+    question = GeneratedQuestion(
+        question="What are the key capabilities in the excerpt?",
+        expected_answer="The model supports long context and multimodal reasoning.",
+        difficulty="factual",
+    )
+
+    reason = evaluate_module._validation_error_for_generated_question(
+        question,
+        chunk_text=(
+            "Gemini models support long-context reasoning and multimodal tasks."
+        ),
+    )
+
+    assert reason == "question is not standalone"
+
+
+def test_generated_question_validation_rejects_weakly_grounded_answer() -> None:
+    question = GeneratedQuestion(
+        question="Who are the authors of SpanBERT?",
+        expected_answer=(
+            "Mandar Joshi, Danqi Chen, Yinhan Liu, Daniel S. Weld, "
+            "Luke Zettlemoyer, and Omer Levy."
+        ),
+        difficulty="factual",
+    )
+
+    reason = evaluate_module._validation_error_for_generated_question(
+        question,
+        chunk_text=(
+            "Related work includes SpanBERT: Improving pre-training by "
+            "representing and predicting spans."
+        ),
+    )
+
+    assert reason == "expected answer is weakly grounded in chunk text"
+
+
+def test_generated_question_validation_accepts_grounded_standalone_question() -> None:
+    question = GeneratedQuestion(
+        question=(
+            "Which CLIP configuration achieved state-of-the-art on 21 of 27 datasets?"
+        ),
+        expected_answer=(
+            "The ViT-L/14 CLIP model with 336-by-336 images achieved "
+            "state-of-the-art on 21 of 27 datasets."
+        ),
+        difficulty="factual",
+    )
+
+    reason = evaluate_module._validation_error_for_generated_question(
+        question,
+        chunk_text=(
+            "The best-performing CLIP configuration used ViT-L/14 with "
+            "336-by-336 images and reached state-of-the-art performance in "
+            "21 of 27 datasets."
+        ),
+    )
+
+    assert reason is None
 
 
 def test_eval_cache_round_trip(tmp_path: Path) -> None:

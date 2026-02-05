@@ -41,6 +41,51 @@ _STOPWORDS = {
     "which",
     "with",
 }
+_MAX_REQUIRED_IMPORTANT_TERMS = 4
+
+
+def _extract_fts_tokens(question: str) -> list[str]:
+    """Extract query tokens suitable for FTS matching.
+
+    Args:
+        question: Raw user query string.
+    Returns:
+        List of token strings in appearance order.
+    Edge cases:
+        Falls back to whitespace splitting when regex extraction fails.
+    """
+
+    tokens = re.findall(r"\w+", question, flags=re.UNICODE)
+    if tokens:
+        return tokens
+
+    raw_tokens = [token for token in re.split(r"\s+", question.strip()) if token]
+    cleaned = [
+        re.sub(r"^[^\w]+|[^\w]+$", "", token, flags=re.UNICODE)
+        for token in raw_tokens
+    ]
+    return [token for token in cleaned if token]
+
+
+def _select_required_terms(terms: Sequence[str], max_terms: int) -> list[str]:
+    """Select a limited number of required terms by length.
+
+    Args:
+        terms: Candidate required terms in appearance order.
+        max_terms: Maximum number of terms to require.
+    Returns:
+        Selected terms in their original order.
+    """
+
+    if max_terms <= 0 or len(terms) <= max_terms:
+        return list(terms)
+
+    ranked = sorted(
+        enumerate(terms),
+        key=lambda item: (-len(item[1]), item[0]),
+    )
+    chosen_indices = sorted(index for index, _ in ranked[:max_terms])
+    return [terms[index] for index in chosen_indices]
 
 
 @dataclass(frozen=True)
@@ -106,14 +151,7 @@ def build_fts_query(question: str) -> str:
         Returns an empty string when no tokens are present.
     """
 
-    tokens = re.findall(r"\w+", question, flags=re.UNICODE)
-    if not tokens:
-        raw_tokens = [token for token in re.split(r"\s+", question.strip()) if token]
-        tokens = [
-            re.sub(r"^[^\w]+|[^\w]+$", "", token, flags=re.UNICODE)
-            for token in raw_tokens
-        ]
-        tokens = [token for token in tokens if token]
+    tokens = _extract_fts_tokens(question)
     if not tokens:
         return ""
 
@@ -125,13 +163,36 @@ def build_fts_query(question: str) -> str:
     common = [token for token in filtered if token not in important]
 
     if important:
-        required = " AND ".join(important)
-        if common:
-            optional = " OR ".join(common)
+        required_terms = _select_required_terms(
+            important,
+            _MAX_REQUIRED_IMPORTANT_TERMS,
+        )
+        required = " AND ".join(required_terms)
+        optional_terms = [token for token in filtered if token not in required_terms]
+        if optional_terms:
+            optional = " OR ".join(optional_terms)
             return f"({required}) AND ({optional})"
         return required
 
     return " OR ".join(common)
+
+
+def _build_relaxed_fts_query(question: str) -> str:
+    """Build a fallback FTS query that ORs all filtered terms.
+
+    Args:
+        question: Raw user query string.
+    Returns:
+        OR-only FTS query string, or empty string when no tokens remain.
+    """
+
+    tokens = _extract_fts_tokens(question)
+    if not tokens:
+        return ""
+    filtered = [token for token in tokens if token.lower() not in _STOPWORDS]
+    if not filtered:
+        return ""
+    return " OR ".join(filtered)
 
 
 def format_snippet(text: str, max_chars: int) -> str:
@@ -185,6 +246,7 @@ def search_fts(
     fts_query = build_fts_query(question)
     if not fts_query:
         return []
+    relaxed_query = _build_relaxed_fts_query(question)
 
     sql = """
         SELECT
@@ -203,6 +265,8 @@ def search_fts(
 
     with sqlite3.connect(db_path) as conn:
         rows = conn.execute(sql, (fts_query, top_k)).fetchall()
+        if not rows and relaxed_query and relaxed_query != fts_query:
+            rows = conn.execute(sql, (relaxed_query, top_k)).fetchall()
 
     return [
         ChunkResult(
@@ -589,6 +653,16 @@ def _dot_product(left: Iterable[float], right: Iterable[float]) -> float:
     return sum(left_value * right_value for left_value, right_value in zip(left, right))
 
 
+@dataclass
+class _RrfEntry:
+    """Mutable accumulator for a fused RRF result."""
+
+    chunk: ChunkResult
+    rrf_score: float
+    provenance: list[BackendProvenance]
+    first_seen: int
+
+
 def _fuse_rrf(
     fts_results: Sequence[ChunkResult],
     vector_results: Sequence[ChunkResult],
@@ -622,7 +696,7 @@ def _fuse_rrf(
     if fts_weight == 0 and vector_weight == 0:
         raise ValueError("at least one weight must be > 0")
 
-    merged: dict[str, dict[str, object]] = {}
+    merged: dict[str, _RrfEntry] = {}
     order_counter = 0
 
     def add_backend(
@@ -640,18 +714,17 @@ def _fuse_rrf(
             rrf_contribution = weight / (rrf_k + rank)
             entry = merged.get(result.chunk_uid)
             if entry is None:
-                entry = {
-                    "chunk": result,
-                    "rrf_score": 0.0,
-                    "provenance": [],
-                    "first_seen": order_counter,
-                }
+                entry = _RrfEntry(
+                    chunk=result,
+                    rrf_score=0.0,
+                    provenance=[],
+                    first_seen=order_counter,
+                )
                 merged[result.chunk_uid] = entry
                 order_counter += 1
 
-            entry["rrf_score"] = float(entry["rrf_score"]) + rrf_contribution
-            provenance: list[BackendProvenance] = entry["provenance"]  # type: ignore[assignment]
-            provenance.append(
+            entry.rrf_score += rrf_contribution
+            entry.provenance.append(
                 BackendProvenance(
                     backend=backend,
                     rank=rank,
@@ -669,21 +742,19 @@ def _fuse_rrf(
 
     ranked = sorted(
         merged.values(),
-        key=lambda entry: (-float(entry["rrf_score"]), int(entry["first_seen"])),
+        key=lambda entry: (-entry.rrf_score, entry.first_seen),
     )
     output: list[HybridChunkResult] = []
     for entry in ranked[:top_k]:
-        chunk: ChunkResult = entry["chunk"]  # type: ignore[assignment]
-        provenance = entry["provenance"]
         output.append(
             HybridChunkResult(
-                chunk_uid=chunk.chunk_uid,
-                chunk_id=chunk.chunk_id,
-                paper_id=chunk.paper_id,
-                page_number=chunk.page_number,
-                text=chunk.text,
-                rrf_score=float(entry["rrf_score"]),
-                provenance=provenance,
+                chunk_uid=entry.chunk.chunk_uid,
+                chunk_id=entry.chunk.chunk_id,
+                paper_id=entry.chunk.paper_id,
+                page_number=entry.chunk.page_number,
+                text=entry.chunk.text,
+                rrf_score=entry.rrf_score,
+                provenance=entry.provenance,
             )
         )
     return output

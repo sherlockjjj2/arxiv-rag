@@ -283,6 +283,8 @@ Notes:
 
 - Hybrid retrieval fuses FTS + vector results using RRF.
 - If Chroma is unavailable or empty, it falls back to SQLite embeddings.
+- FTS queries require only a small set of long terms and fall back to an OR-only
+  query when the strict query returns no hits.
 
 ### Sources (hybrid + verbose alias)
 
@@ -317,9 +319,14 @@ uv run python -m arxiv_rag.cli eval-run --eval-set-path eval/eval_set.json --db 
 Notes:
 
 - Edit `eval/eval_set.json` manually to review or correct QA pairs before running eval.
+- `eval-generate` now auto-filters low-quality QA pairs (for example, questions that reference "the excerpt" or answers weakly grounded in chunk text).
+- If you want stricter selection with more headroom, increase `--questions-per-chunk` (for example `2` or `3`) and keep `--n-questions` fixed.
+- Use `--temperature` and `--top-p` to adjust QA creativity (defaults `0.8` and `0.9`).
+- `eval-generate` enforces a balanced list of question openings by default; override with `--openings-path` (JSON list or one opening per line).
 - Citation accuracy is only computed when `--generate` is enabled.
 - Eval summary includes `citation_accuracy_when_recall5_hit` to separate retrieval misses from citation selection issues.
 - Failure modes distinguish `citation_absent` (no parsed citations) from `citation_zero_score` (citations present but none matched ground truth).
+- Eval reports include generation-context diagnostics for missing ground-truth chunks or citations outside the provided context.
 - Generation for `eval-run --generate` is concurrent by default (`--generation-concurrency 4`) to reduce wall-clock latency.
 - `eval-run` now uses a persistent SQLite cache by default at `eval/cache/eval_cache.db` for query embeddings and generated answers.
 - Use `--disable-cache` to force fresh API calls, or `--cache-db <path>` to override the cache location.
@@ -388,6 +395,7 @@ sqlite3 data/arxiv_rag.db "SELECT COUNT(*) AS papers FROM papers; SELECT COUNT(*
 
 - arXiv ID parsing helpers live in `arxiv_rag/arxiv_ids.py`.
 - SQLite schema helpers live in `arxiv_rag/db.py`.
+- Hybrid RRF fusion uses a dedicated accumulator dataclass for type-safe provenance aggregation.
 
 ## Testing
 
