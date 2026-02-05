@@ -241,6 +241,30 @@ def test_generated_question_validation_accepts_grounded_standalone_question() ->
     assert reason is None
 
 
+def test_reference_like_chunk_detection_flags_bibliography() -> None:
+    text = (
+        "Mandar Joshi, Danqi Chen, Yinhan Liu, et al. 2019. SpanBERT: "
+        "Improving pre-training by representing and predicting spans. "
+        "arXiv preprint arXiv:1907.10529. In Proceedings of the 2020 "
+        "Conference on Empirical Methods in Natural Language Processing, "
+        "pp. 8736–8754. doi: 10.18653/v1/2020.emnlp-main.704. URL "
+        "https://aclanthology.org/2020.emnlp-main.704."
+    )
+
+    assert evaluate_module._is_reference_like_chunk(text) is True
+
+
+def test_reference_like_chunk_detection_allows_content() -> None:
+    text = (
+        "We evaluate the model on 27 datasets and find that the ViT-L/14 "
+        "configuration achieves state-of-the-art performance in 21 of them. "
+        "The improvement is consistent across tasks and supports the use of "
+        "natural language supervision for pre-training."
+    )
+
+    assert evaluate_module._is_reference_like_chunk(text) is False
+
+
 def test_eval_cache_round_trip(tmp_path: Path) -> None:
     cache = EvalCache(tmp_path / "eval_cache.db")
     cache.set_query_embedding(

@@ -131,6 +131,26 @@ _OVERLAP_STOPWORDS = frozenset(
         "with",
     }
 )
+_REFERENCE_CUE_PATTERNS = (
+    r"\barxiv\b",
+    r"\bpreprint\b",
+    r"\bproceedings\b",
+    r"\bconference\b",
+    r"\bjournal\b",
+    r"\btechnical report\b",
+    r"\bdoi\b",
+    r"\bvol\.\b",
+    r"\bno\.\b",
+    r"\bpp\.\b",
+    r"\bpages?\b",
+    r"\burl\b",
+    r"\beditors?\b",
+    r"\bpublisher\b",
+    r"\bissn\b",
+    r"\bisbn\b",
+    r"\bcorr\b",
+)
+_REFERENCE_YEAR_PATTERN = re.compile(r"\b(19|20)\d{2}\b")
 
 
 def _round_robin_openings(groups: Sequence[list[str]]) -> list[str]:
@@ -1228,6 +1248,32 @@ def _has_minimum_grounding_overlap(expected_answer: str, chunk_text: str) -> boo
     return overlap >= 2 and (overlap / len(answer_tokens)) >= 0.25
 
 
+def _is_reference_like_chunk(text: str) -> bool:
+    """Heuristically detect reference-like chunks for eval QA generation.
+
+    Args:
+        text: Chunk text content.
+    Returns:
+        True when the chunk looks like a bibliography or references section.
+    """
+
+    if not text.strip():
+        return False
+
+    normalized = text.lower()
+    cue_hits = sum(
+        1 for pattern in _REFERENCE_CUE_PATTERNS if re.search(pattern, normalized)
+    )
+    year_hits = len(_REFERENCE_YEAR_PATTERN.findall(normalized))
+    if cue_hits >= 3 and year_hits >= 2:
+        return True
+    if year_hits >= 6 and cue_hits >= 2:
+        return True
+    if cue_hits >= 4 and year_hits >= 1:
+        return True
+    return False
+
+
 def _validation_error_for_generated_question(
     question: GeneratedQuestion,
     *,
@@ -1586,18 +1632,18 @@ def _load_candidate_chunk_uids(db_path: Path, *, min_chars: int) -> list[str]:
         db_path: SQLite database path.
         min_chars: Minimum chunk text length.
     Returns:
-        List of chunk UIDs.
+        List of chunk UIDs excluding reference-like chunks.
     """
 
     sql = """
-        SELECT chunk_uid
+        SELECT chunk_uid, text
         FROM chunks
         WHERE LENGTH(text) >= ?
         ORDER BY chunk_uid
     """
     with sqlite3.connect(db_path) as conn:
         rows = conn.execute(sql, (min_chars,)).fetchall()
-    return [row[0] for row in rows]
+    return [row[0] for row in rows if not _is_reference_like_chunk(row[1])]
 
 
 def _load_chunk_sample(conn: sqlite3.Connection, chunk_uid: str) -> ChunkSample | None:

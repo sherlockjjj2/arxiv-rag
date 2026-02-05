@@ -169,6 +169,90 @@ def test_generate_answer_uses_prompt_and_model(monkeypatch: pytest.MonkeyPatch) 
     assert getattr(captured["config"], "model") == "gpt-4o-mini"
 
 
+def test_select_evidence_chunks_includes_top_ranked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    generate, Chunk, _ = _load_generate()
+
+    class DummyClient:
+        def __init__(self, config: object) -> None:
+            self._config = config
+
+        def generate(self, *, prompt: str, query: str) -> str:
+            return '{"selected":[3,2],"reason":"ok"}'
+
+    monkeypatch.setattr(generate, "GenerationClient", DummyClient)
+    monkeypatch.setattr(
+        generate,
+        "load_selection_prompt_template",
+        lambda path=None: "S {chunks} {query} {max_chunks}",
+    )
+
+    chunks = [
+        Chunk(
+            paper_id="1234.5678",
+            page_number=1,
+            text="chunk one",
+            chunk_uid="uid-1",
+        ),
+        Chunk(
+            paper_id="1234.5678",
+            page_number=2,
+            text="chunk two",
+            chunk_uid="uid-2",
+        ),
+        Chunk(
+            paper_id="1234.5678",
+            page_number=3,
+            text="chunk three",
+            chunk_uid="uid-3",
+        ),
+    ]
+
+    selected = generate.select_evidence_chunks("question", chunks, max_chunks=2)
+
+    assert [chunk.chunk_uid for chunk in selected] == ["uid-1", "uid-3"]
+
+
+def test_select_evidence_chunks_guardrail_respects_max_chunks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    generate, Chunk, _ = _load_generate()
+
+    class DummyClient:
+        def __init__(self, config: object) -> None:
+            self._config = config
+
+        def generate(self, *, prompt: str, query: str) -> str:
+            return '{"selected":[2],"reason":"ok"}'
+
+    monkeypatch.setattr(generate, "GenerationClient", DummyClient)
+    monkeypatch.setattr(
+        generate,
+        "load_selection_prompt_template",
+        lambda path=None: "S {chunks} {query} {max_chunks}",
+    )
+
+    chunks = [
+        Chunk(
+            paper_id="1234.5678",
+            page_number=1,
+            text="chunk one",
+            chunk_uid="uid-1",
+        ),
+        Chunk(
+            paper_id="1234.5678",
+            page_number=2,
+            text="chunk two",
+            chunk_uid="uid-2",
+        ),
+    ]
+
+    selected = generate.select_evidence_chunks("question", chunks, max_chunks=1)
+
+    assert [chunk.chunk_uid for chunk in selected] == ["uid-1"]
+
+
 def test_remap_citations_by_quote_overlap_rewrites_citation() -> None:
     generate, Chunk, _ = _load_generate()
     chunks = [
@@ -210,6 +294,54 @@ def test_remap_citations_by_quote_overlap_keeps_unmatched_citation() -> None:
         "This claim has weak evidence "
         '[arXiv:1234.5678 p.1] *"completely unrelated phrase tokens"*.'
     )
+
+    remapped = generate.remap_citations_by_quote_overlap(answer, chunks)
+
+    assert remapped == answer
+
+
+def test_remap_citations_by_sentence_overlap_rewrites_citation() -> None:
+    generate, Chunk, _ = _load_generate()
+    chunks = [
+        Chunk(
+            paper_id="2312.11805",
+            page_number=4,
+            text=(
+                "Gemini Ultra delivers state-of-the-art performance across a "
+                "wide range of highly complex tasks, including reasoning and "
+                "multimodal tasks."
+            ),
+            chunk_uid="u1",
+        ),
+        Chunk(
+            paper_id="2005.14165",
+            page_number=12,
+            text="Unrelated chunk text about another model.",
+            chunk_uid="u2",
+        ),
+    ]
+    answer = (
+        "Gemini Ultra delivers state-of-the-art performance across reasoning "
+        "and multimodal tasks [arXiv:9999.0000 p.1]."
+    )
+
+    remapped = generate.remap_citations_by_quote_overlap(answer, chunks)
+
+    assert "[arXiv:2312.11805 p.4]" in remapped
+    assert "[arXiv:9999.0000 p.1]" not in remapped
+
+
+def test_remap_citations_by_sentence_overlap_skips_low_overlap() -> None:
+    generate, Chunk, _ = _load_generate()
+    chunks = [
+        Chunk(
+            paper_id="2204.02311",
+            page_number=47,
+            text="There is potential for malicious use of such large LMs.",
+            chunk_uid="u1",
+        )
+    ]
+    answer = "This statement is generic [arXiv:1234.5678 p.1]."
 
     remapped = generate.remap_citations_by_quote_overlap(answer, chunks)
 

@@ -4,6 +4,7 @@ Rules:
 1. Keep the answer grounded in the chunks. Remove unsupported claims.
 2. Every paragraph must include at least one citation in the format [arXiv:ID p.N] immediately followed by *"quote"*.
 3. Quotes must be exact substrings of the cited chunk text after whitespace normalization.
+3a. Do NOT use the literal placeholder *"quote"*; the quote must match the cited chunk text verbatim.
 4. If information is insufficient, say so but still cite the most relevant chunk.
 
 CHUNKS:

@@ -324,7 +324,9 @@ uv run python -m arxiv_rag.cli eval-run --eval-set-path eval/eval_set.json --db 
 Notes:
 
 - Edit `eval/eval_set.json` manually to review or correct QA pairs before running eval.
+- If you correct eval items manually, ensure ground-truth chunk IDs align with the cited page text (for example, q010/q015/q040 fixes on 2026-02-05).
 - `eval-generate` now auto-filters low-quality QA pairs (for example, questions that reference "the excerpt" or answers weakly grounded in chunk text).
+- `eval-generate` skips reference-like chunks (bibliography-heavy pages with citations/URLs) to avoid unanswerable QA pairs.
 - If you want stricter selection with more headroom, increase `--questions-per-chunk` (for example `2` or `3`) and keep `--n-questions` fixed.
 - Use `--temperature` and `--top-p` to adjust QA creativity (defaults `0.8` and `0.9`).
 - `eval-generate` enforces a balanced list of question openings by default; override with `--openings-path` (JSON list or one opening per line).
@@ -335,9 +337,11 @@ Notes:
 - Eval reports include generation-context diagnostics for missing ground-truth chunks or citations outside the provided context.
 - Use `--generation-rerank lexical` with `eval-run --generate` to rerank chunks before generation.
 - Use `--generation-select-evidence` with `eval-run --generate` to force a smaller, model-selected evidence set; tune with `--generation-select-k`.
+- Evidence selection always includes the top-ranked chunk as a guardrail (so `--generation-select-k 1` effectively keeps chunk 1).
 - Use `--generation-quote-first` with `eval-run --generate` to anchor answers to a single quoted chunk.
 - Use `--generation-cite-chunk-index` with `eval-run --generate` to map chunk-index citations to page-level citations.
 - Use `--generation-repair-citations` to repair missing/malformed citations during eval generation.
+- Generation applies a fallback remap that uses sentence-level overlap to realign citations when quotes are missing.
 - Generation for `eval-run --generate` is concurrent by default (`--generation-concurrency 4`) to reduce wall-clock latency.
 - `eval-run` now uses a persistent SQLite cache by default at `eval/cache/eval_cache.db` for query embeddings and generated answers.
 - Use `--disable-cache` to force fresh API calls, or `--cache-db <path>` to override the cache location.
@@ -357,13 +361,12 @@ sqlite3 data/arxiv_rag.db "SELECT COUNT(*) AS papers FROM papers; SELECT COUNT(*
 ```
 
 **Learning 2026-02-05**
-- Retrieval was not the bottleneck: recall/MRR stayed stable while citation accuracy moved.
-- Main accuracy drag was over-citation and wrong-page-within-paper, not missing ground truth in context.
-- Best config so far: `--generation-top-k 10` + `--generation-select-evidence` + `--generation-select-k 1` + `--generation-repair-citations` improved citation accuracy to ~0.76 and reduced over-citation sharply.
-- Enforcing exactly one citation per paragraph alone removed citation-absent cases but increased zero-score citations; not a net win by itself.
-- Quote-first generation and chunk-index citation mapping did not change metrics in the tested runs.
-- Model swaps were not a reliable lever: `gpt-4.1-mini` underperformed the baseline; `gpt-4.1` showed no clear improvement and hit rate limits.
-- For `gpt-4.1`, use low concurrency or batch runs; rate limiting is likely with selection/repair enabled.
+- Retrieval was not the bottleneck; most errors were citation grounding or eval-set quality.
+- Eval-set quality matters: reference-like chunks produced unanswerable QA. Added reference-chunk filtering in `eval-generate` and fixed ground-truth mismatches (q010/q015/q040).
+- Evidence selection guardrail (always include top-ranked chunk) helped, but `--generation-select-k 1` was too strict; `--generation-select-k 2` was a better tradeoff.
+- Best config so far (with the refreshed eval set): `--generation-top-k 10` + `--generation-rerank lexical` + `--generation-select-evidence` + `--generation-select-k 2` + `--generation-repair-citations` reached citation accuracy `0.91` (Recall@5 `0.92`).
+- Tightened citation grounding by forbidding the literal *"quote"* placeholder and adding sentence-overlap remapping when quotes are missing.
+- `--generation-cite-chunk-index` regressed in this eval set; keep it off for now.
 
 ## Data locations
 
