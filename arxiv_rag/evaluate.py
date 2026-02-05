@@ -1028,10 +1028,18 @@ def render_eval_prompt(
     for placeholder in required_placeholders:
         if f"${placeholder}" not in template:
             raise ValueError(f"Prompt template missing ${placeholder} placeholder")
-    if "$OPENINGS" in template and openings is None:
-        raise ValueError("Prompt template requires $OPENINGS but none were provided.")
-    if openings is not None and len(openings) != n_questions:
-        raise ValueError("Openings length must match n_questions.")
+    if openings is None:
+        if "$OPENINGS" in template:
+            raise ValueError(
+                "Prompt template requires $OPENINGS but none were provided."
+            )
+    else:
+        if "$OPENINGS" not in template:
+            raise ValueError(
+                "Prompt template missing $OPENINGS placeholder for provided openings."
+            )
+        if len(openings) != n_questions:
+            raise ValueError("Openings length must match n_questions.")
 
     placeholders = {
         "CHUNK_TEXT": chunk.text.replace("$", "$$"),

@@ -324,6 +324,7 @@ Notes:
 - If you want stricter selection with more headroom, increase `--questions-per-chunk` (for example `2` or `3`) and keep `--n-questions` fixed.
 - Use `--temperature` and `--top-p` to adjust QA creativity (defaults `0.8` and `0.9`).
 - `eval-generate` enforces a balanced list of question openings by default; override with `--openings-path` (JSON list or one opening per line).
+- Custom eval QA prompt templates must include `$OPENINGS` when openings are enforced (default).
 - Citation accuracy is only computed when `--generate` is enabled.
 - Eval summary includes `citation_accuracy_when_recall5_hit` to separate retrieval misses from citation selection issues.
 - Failure modes distinguish `citation_absent` (no parsed citations) from `citation_zero_score` (citations present but none matched ground truth).

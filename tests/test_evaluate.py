@@ -3,6 +3,7 @@ from pathlib import Path
 import time
 
 import arxiv_rag.evaluate as evaluate_module
+import pytest
 from arxiv_rag.evaluate import (
     CachedEmbeddingsClient,
     EvalCache,
@@ -19,6 +20,7 @@ from arxiv_rag.evaluate import (
     compute_citation_accuracy,
     compute_mrr,
     compute_recall_at_k,
+    render_eval_prompt,
     render_report_markdown,
     run_eval,
 )
@@ -137,6 +139,44 @@ def test_render_report_markdown_includes_new_citation_fields() -> None:
     assert "Citation accuracy (Recall@5 > 0): 0.890" in rendered
     assert "Citation absent: 4" in rendered
     assert "Citation zero score: 12" in rendered
+
+
+def test_render_eval_prompt_requires_openings_placeholder() -> None:
+    chunk = evaluate_module.ChunkSample(
+        chunk_uid="uid-1",
+        paper_id="1234.5678",
+        page_number=2,
+        text="Example text.",
+        title=None,
+    )
+    template = "$CHUNK_TEXT $PAPER_ID $PAGE_NUMBER $CHUNK_UID $N_QUESTIONS"
+
+    with pytest.raises(ValueError, match="missing \\$OPENINGS"):
+        render_eval_prompt(
+            template,
+            chunk=chunk,
+            n_questions=1,
+            openings=["What"],
+        )
+
+
+def test_render_eval_prompt_requires_openings_when_placeholder_present() -> None:
+    chunk = evaluate_module.ChunkSample(
+        chunk_uid="uid-1",
+        paper_id="1234.5678",
+        page_number=2,
+        text="Example text.",
+        title=None,
+    )
+    template = "$CHUNK_TEXT $PAPER_ID $PAGE_NUMBER $CHUNK_UID $N_QUESTIONS $OPENINGS"
+
+    with pytest.raises(ValueError, match="requires \\$OPENINGS"):
+        render_eval_prompt(
+            template,
+            chunk=chunk,
+            n_questions=1,
+            openings=None,
+        )
 
 
 def test_generated_question_validation_rejects_excerpt_reference() -> None:
