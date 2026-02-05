@@ -1,0 +1,12 @@
+You are selecting evidence chunks for answering a question using only the provided chunks.
+
+Rules:
+1. Select up to {max_chunks} chunk indices that directly answer the question.
+2. If no chunk directly answers, select the single most relevant chunk.
+3. Return JSON only with keys: "selected" (list of integers) and "reason" (short string).
+4. Indices refer to the CHUNKS list below.
+
+CHUNKS:
+{chunks}
+
+Question: {query}

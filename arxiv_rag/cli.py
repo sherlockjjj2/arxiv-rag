@@ -35,9 +35,11 @@ from arxiv_rag.db import (
 from arxiv_rag.embeddings_client import EmbeddingsClient, EmbeddingsConfig
 from arxiv_rag.evaluate import (
     RetrievalConfig,
+    build_openings_plan,
     check_eval_set_coverage,
     generate_eval_set,
     load_eval_set,
+    load_openings_from_path,
     run_eval,
     save_eval_report,
 )
@@ -47,6 +49,7 @@ from arxiv_rag.retrieve import (
     ChunkResult,
     format_snippet,
     HybridChunkResult,
+    rerank_results_for_generation,
     search_fts,
     search_hybrid,
     search_vector_chroma,
@@ -698,6 +701,34 @@ def query(
         "gpt-4o-mini",
         help="Model for answer generation.",
     ),
+    generation_rerank: Literal["none", "lexical"] = typer.Option(
+        "none",
+        help="Rerank retrieved chunks before generation.",
+    ),
+    generation_select_evidence: bool = typer.Option(
+        False,
+        help="Select a smaller evidence set before generation.",
+    ),
+    generation_select_k: int = typer.Option(
+        3,
+        help="Max chunks to keep when evidence selection is enabled.",
+    ),
+    generation_quote_first: bool = typer.Option(
+        False,
+        help="Force quote-first generation anchored to one chunk.",
+    ),
+    generation_cite_chunk_index: bool = typer.Option(
+        False,
+        help="Use [chunk:N] citations and map to pages after generation.",
+    ),
+    generation_repair_citations: bool = typer.Option(
+        False,
+        help="Repair missing or invalid citations after generation.",
+    ),
+    generation_repair_max_attempts: int = typer.Option(
+        1,
+        help="Max attempts for citation repair when enabled.",
+    ),
     verify: bool = typer.Option(
         False,
         help="Verify citations and quotes in the generated answer.",
@@ -737,6 +768,19 @@ def query(
     if verify and not generate:
         typer.echo("--verify requires --generate.", err=True)
         raise typer.Exit(code=1)
+    if generate and generation_select_k <= 0:
+        typer.echo("--generation-select-k must be > 0.", err=True)
+        raise typer.Exit(code=1)
+    if generate and generation_repair_max_attempts <= 0:
+        typer.echo("--generation-repair-max-attempts must be > 0.", err=True)
+        raise typer.Exit(code=1)
+    if generate and generation_cite_chunk_index and generation_quote_first:
+        typer.echo(
+            "--generation-cite-chunk-index cannot be combined with "
+            "--generation-quote-first.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
 
     start_time = time.perf_counter()
 
@@ -773,6 +817,9 @@ def query(
                 )
             raise typer.Exit(code=0)
 
+        if generation_rerank == "lexical":
+            results = rerank_results_for_generation(question, results)
+
         chunks = [
             GenerationChunk(
                 chunk_uid=result.chunk_uid,
@@ -788,6 +835,12 @@ def query(
                 question,
                 chunks,
                 model=generate_model,
+                select_evidence=generation_select_evidence,
+                selection_max_chunks=generation_select_k,
+                quote_first=generation_quote_first,
+                cite_chunk_index=generation_cite_chunk_index,
+                repair_citations=generation_repair_citations,
+                repair_max_attempts=generation_repair_max_attempts,
             )
         except ValueError as exc:
             typer.echo(str(exc), err=True)
@@ -1003,8 +1056,12 @@ def eval_generate(
         help="Model for QA generation.",
     ),
     temperature: float = typer.Option(
-        0.2,
+        0.8,
         help="Sampling temperature.",
+    ),
+    top_p: float = typer.Option(
+        0.9,
+        help="Top-p nucleus sampling for QA generation.",
     ),
     max_output_tokens: int = typer.Option(
         800,
@@ -1022,6 +1079,10 @@ def eval_generate(
         None,
         help="Optional override for the QA prompt template.",
     ),
+    openings_path: Path | None = typer.Option(
+        None,
+        help="Optional path to a JSON list or newline-delimited openings list.",
+    ),
     corpus_version: str = typer.Option(
         "v1",
         help="Corpus version label to store in metadata.",
@@ -1031,6 +1092,11 @@ def eval_generate(
 
     logging.basicConfig(level=logging.INFO)
     try:
+        openings_plan = (
+            load_openings_from_path(openings_path)
+            if openings_path is not None
+            else build_openings_plan(n_questions, seed=seed)
+        )
         eval_set = generate_eval_set(
             db_path=db,
             output_path=output,
@@ -1040,11 +1106,13 @@ def eval_generate(
             min_chars=min_chars,
             model=model,
             temperature=temperature,
+            top_p=top_p,
             max_output_tokens=max_output_tokens,
             request_timeout_s=request_timeout_s,
             max_retries=max_retries,
             prompt_path=prompt_path,
             corpus_version=corpus_version,
+            openings_plan=openings_plan,
         )
     except (ValueError, FileNotFoundError) as exc:
         typer.echo(str(exc), err=True)
@@ -1128,6 +1196,34 @@ def eval_run(
         5,
         help="Number of chunks to pass into generation.",
     ),
+    generation_rerank: Literal["none", "lexical"] = typer.Option(
+        "none",
+        help="Rerank retrieved chunks before generation.",
+    ),
+    generation_select_evidence: bool = typer.Option(
+        False,
+        help="Select a smaller evidence set before generation.",
+    ),
+    generation_select_k: int = typer.Option(
+        3,
+        help="Max chunks to keep when evidence selection is enabled.",
+    ),
+    generation_quote_first: bool = typer.Option(
+        False,
+        help="Force quote-first generation anchored to one chunk.",
+    ),
+    generation_cite_chunk_index: bool = typer.Option(
+        False,
+        help="Use [chunk:N] citations and map to pages after generation.",
+    ),
+    generation_repair_citations: bool = typer.Option(
+        False,
+        help="Repair missing or invalid citations after generation.",
+    ),
+    generation_repair_max_attempts: int = typer.Option(
+        1,
+        help="Max attempts for citation repair when enabled.",
+    ),
     generation_concurrency: int = typer.Option(
         4,
         help="Maximum concurrent generation calls when --generate is enabled.",
@@ -1184,6 +1280,13 @@ def eval_run(
             generate=generate,
             generate_model=generate_model,
             generation_top_k=effective_generation_top_k,
+            generation_rerank=generation_rerank,
+            generation_select_evidence=generation_select_evidence,
+            generation_select_k=generation_select_k,
+            generation_quote_first=generation_quote_first,
+            generation_cite_chunk_index=generation_cite_chunk_index,
+            generation_repair_citations=generation_repair_citations,
+            generation_repair_max_attempts=generation_repair_max_attempts,
             generation_concurrency=generation_concurrency,
             cache_db_path=None if disable_cache else cache_db,
         )

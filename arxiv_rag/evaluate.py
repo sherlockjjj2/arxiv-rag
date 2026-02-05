@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import random
+import re
 import sqlite3
 from hashlib import sha256
 from dataclasses import dataclass, field
@@ -35,12 +36,18 @@ from arxiv_rag.embeddings_client import (
 )
 from arxiv_rag.generate import (
     Chunk as GenerationChunk,
+    load_chunk_citation_prompt_template,
     generate_answer,
+    load_quote_first_prompt_template,
+    load_quote_selection_prompt_template,
     load_prompt_template,
+    load_repair_prompt_template,
+    load_selection_prompt_template,
 )
 from arxiv_rag.retrieve import (
     ChunkResult,
     HybridChunkResult,
+    rerank_results_for_generation,
     search_fts,
     search_hybrid,
     search_vector_chroma,
@@ -52,6 +59,174 @@ LOGGER = logging.getLogger(__name__)
 _DEFAULT_EVAL_PROMPT_PATH = (
     Path(__file__).resolve().parent / "prompts" / "generate_eval_qa.txt"
 )
+_MAX_QA_ATTEMPTS_PER_CHUNK = 3
+_DISALLOWED_QUESTION_PHRASES = (
+    "in the excerpt",
+    "from the excerpt",
+    "this excerpt",
+    "the excerpt",
+    "as described in the excerpt",
+    "as described in this excerpt",
+    "as mentioned in the excerpt",
+    "according to the excerpt",
+    "in this passage",
+    "from this passage",
+    "the passage",
+    "the text above",
+    "the above text",
+    "the paper referenced",
+)
+_OPENING_GROUPS: list[list[str]] = [
+    ["Why", "How", "What", "When"],
+    [
+        "Compared to",
+        "In comparison to",
+        "How does",
+        "What distinguishes",
+        "In what way",
+    ],
+    ["Under what conditions", "In which case", "In what situation", "When would"],
+    ["What limitation", "What trade-off", "What constraint", "What drawback"],
+    [
+        "What is the implication",
+        "What does this suggest",
+        "What does this imply",
+        "What follows from",
+    ],
+    [
+        "What explains",
+        "What factors",
+        "What mechanism",
+        "What role does",
+        "To what extent",
+    ],
+]
+_OVERLAP_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "by",
+        "for",
+        "from",
+        "has",
+        "in",
+        "is",
+        "it",
+        "its",
+        "of",
+        "on",
+        "or",
+        "that",
+        "the",
+        "their",
+        "this",
+        "to",
+        "was",
+        "were",
+        "with",
+    }
+)
+
+
+def _round_robin_openings(groups: Sequence[list[str]]) -> list[str]:
+    """Interleave opening groups in round-robin order."""
+
+    output: list[str] = []
+    remaining = True
+    while remaining:
+        remaining = False
+        for group in groups:
+            if not group:
+                continue
+            output.append(group.pop())
+            remaining = True
+    return output
+
+
+def _build_openings_round(rng: random.Random) -> list[str]:
+    """Build one balanced round of openings."""
+
+    groups = [group.copy() for group in _OPENING_GROUPS]
+    for group in groups:
+        rng.shuffle(group)
+    return _round_robin_openings(groups)
+
+
+def build_openings_plan(n_questions: int, *, seed: int | None) -> list[str]:
+    """Build a balanced, mostly-unique list of openings for eval questions.
+
+    Args:
+        n_questions: Number of questions to generate.
+        seed: Optional RNG seed for stable ordering.
+    Returns:
+        List of opening strings, length n_questions.
+    Raises:
+        ValueError: If n_questions is not positive or exceeds supported capacity.
+    """
+
+    if n_questions <= 0:
+        raise ValueError("n_questions must be > 0")
+
+    rng = random.Random(0 if seed is None else seed)
+    first_round = _build_openings_round(rng)
+    if n_questions <= len(first_round):
+        return first_round[:n_questions]
+
+    second_round = _build_openings_round(rng)
+    combined = first_round + second_round
+    if n_questions > len(combined):
+        raise ValueError(
+            "n_questions exceeds available openings; provide --openings-path or lower n_questions."
+        )
+    return combined[:n_questions]
+
+
+def load_openings_from_path(path: Path) -> list[str]:
+    """Load openings from a JSON list or newline-delimited text file.
+
+    Args:
+        path: Path to the openings file.
+    Returns:
+        List of opening strings.
+    Raises:
+        FileNotFoundError: If the path does not exist.
+        ValueError: If the file is empty or malformed.
+    """
+
+    if not path.exists():
+        raise FileNotFoundError(f"Openings file not found: {path}")
+
+    raw_text = path.read_text(encoding="utf-8").strip()
+    if not raw_text:
+        raise ValueError(f"Openings file is empty: {path}")
+
+    openings: list[str]
+    if raw_text.lstrip().startswith("["):
+        payload = json.loads(raw_text)
+        if not isinstance(payload, list):
+            raise ValueError("Openings JSON must be a list of strings.")
+        openings = [item.strip() for item in payload if isinstance(item, str)]
+    else:
+        openings = [line.strip() for line in raw_text.splitlines()]
+
+    openings = [opening for opening in openings if opening]
+    if not openings:
+        raise ValueError("Openings list must contain at least one entry.")
+    return openings
+
+
+def format_openings_for_prompt(openings: Sequence[str]) -> str:
+    """Format openings for prompt injection."""
+
+    return "\n".join(
+        f"{index + 1}. {opening}" for index, opening in enumerate(openings)
+    )
+
 
 Difficulty = Literal["factual", "synthesis"]
 
@@ -199,6 +374,7 @@ class EvalGenerationConfig:
     Args:
         model: OpenAI model name.
         temperature: Sampling temperature.
+        top_p: Top-p nucleus sampling value.
         max_output_tokens: Maximum tokens for completion.
         request_timeout_s: Timeout for a single request.
         max_retries: Maximum retry attempts for transient errors.
@@ -207,7 +383,8 @@ class EvalGenerationConfig:
     """
 
     model: str = "gpt-4o-mini"
-    temperature: float = 0.2
+    temperature: float = 0.8
+    top_p: float = 0.9
     max_output_tokens: int = 800
     request_timeout_s: float = 60.0
     max_retries: int = 5
@@ -272,6 +449,12 @@ class EvalItemResult:
         citation_accuracy: Citation accuracy, if generated.
         citation_error: Citation parse or validation error.
         generation_error: Generation error, if any.
+        ground_truth_in_generation_context: Whether a ground truth chunk was in the
+            generation context.
+        citations_in_generation_context: Number of citations that reference a
+            retrieved generation chunk page.
+        citations_outside_generation_context: Number of citations that reference a
+            page outside the generation context.
         warnings: Retrieval warnings.
     """
 
@@ -287,6 +470,9 @@ class EvalItemResult:
     citation_accuracy: float | None = None
     citation_error: str | None = None
     generation_error: str | None = None
+    ground_truth_in_generation_context: bool | None = None
+    citations_in_generation_context: int | None = None
+    citations_outside_generation_context: int | None = None
     warnings: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, object]:
@@ -305,6 +491,13 @@ class EvalItemResult:
             "citation_accuracy": self.citation_accuracy,
             "citation_error": self.citation_error,
             "generation_error": self.generation_error,
+            "ground_truth_in_generation_context": (
+                self.ground_truth_in_generation_context
+            ),
+            "citations_in_generation_context": (self.citations_in_generation_context),
+            "citations_outside_generation_context": (
+                self.citations_outside_generation_context
+            ),
             "warnings": list(self.warnings),
         }
 
@@ -700,6 +893,9 @@ class _EvalComputation:
     citation_accuracy: float | None = None
     citation_error: str | None = None
     generation_error: str | None = None
+    ground_truth_in_generation_context: bool | None = None
+    citations_in_generation_context: int | None = None
+    citations_outside_generation_context: int | None = None
 
 
 _GenerationCacheKey = tuple[str, str, str, str]
@@ -723,11 +919,14 @@ class EvalGenerationClient:
         self._config = config
         self._client = client or OpenAI()
 
-    def generate_questions(self, *, prompt: str) -> EvalGenerationResult:
+    def generate_questions(
+        self, *, prompt: str, openings: Sequence[str] | None = None
+    ) -> EvalGenerationResult:
         """Generate QA pairs from a prompt.
 
         Args:
             prompt: Prompt containing chunk context.
+            openings: Optional openings list to validate prefixes.
         Returns:
             EvalGenerationResult with parsed questions.
         Raises:
@@ -761,7 +960,7 @@ class EvalGenerationClient:
         if content is None:
             raise ValueError("Eval QA response contained empty content.")
 
-        questions = parse_generated_questions(content)
+        questions = parse_generated_questions(content, openings=openings)
         return EvalGenerationResult(questions=questions, raw_text=content)
 
     def _create_completion(self, *, prompt: str):
@@ -782,6 +981,7 @@ class EvalGenerationClient:
                         {"role": "user", "content": "Generate the questions."},
                     ],
                     temperature=self._config.temperature,
+                    top_p=self._config.top_p,
                     max_tokens=self._config.max_output_tokens,
                     timeout=self._config.request_timeout_s,
                 )
@@ -810,13 +1010,20 @@ def load_eval_prompt_template(path: Path | None = None) -> str:
     return template
 
 
-def render_eval_prompt(template: str, *, chunk: ChunkSample, n_questions: int) -> str:
+def render_eval_prompt(
+    template: str,
+    *,
+    chunk: ChunkSample,
+    n_questions: int,
+    openings: Sequence[str] | None = None,
+) -> str:
     """Render the eval QA prompt template.
 
     Args:
         template: Prompt template text.
         chunk: Chunk sample with metadata and text.
         n_questions: Number of questions to request.
+        openings: Optional openings list to enforce question prefixes.
     Returns:
         Rendered prompt string.
     Raises:
@@ -833,6 +1040,18 @@ def render_eval_prompt(template: str, *, chunk: ChunkSample, n_questions: int) -
     for placeholder in required_placeholders:
         if f"${placeholder}" not in template:
             raise ValueError(f"Prompt template missing ${placeholder} placeholder")
+    if openings is None:
+        if "$OPENINGS" in template:
+            raise ValueError(
+                "Prompt template requires $OPENINGS but none were provided."
+            )
+    else:
+        if "$OPENINGS" not in template:
+            raise ValueError(
+                "Prompt template missing $OPENINGS placeholder for provided openings."
+            )
+        if len(openings) != n_questions:
+            raise ValueError("Openings length must match n_questions.")
 
     placeholders = {
         "CHUNK_TEXT": chunk.text.replace("$", "$$"),
@@ -842,17 +1061,41 @@ def render_eval_prompt(template: str, *, chunk: ChunkSample, n_questions: int) -
         "TITLE": (chunk.title or "").replace("$", "$$"),
         "N_QUESTIONS": str(n_questions),
     }
+    if openings is not None:
+        placeholders["OPENINGS"] = format_openings_for_prompt(openings).replace(
+            "$", "$$"
+        )
     rendered = Template(template).safe_substitute(placeholders)
     if "$TITLE" in template and not placeholders["TITLE"]:
         LOGGER.debug("Eval QA prompt rendered without title.")
     return rendered
 
 
-def parse_generated_questions(raw_text: str) -> list[GeneratedQuestion]:
+def _validate_question_openings(
+    questions: Sequence[GeneratedQuestion], openings: Sequence[str]
+) -> None:
+    """Ensure each generated question starts with the expected opening."""
+
+    if len(questions) != len(openings):
+        raise ValueError(
+            "Generated question count does not match the required openings list."
+        )
+    for index, (question, opening) in enumerate(zip(questions, openings), start=1):
+        normalized = question.question.lstrip()
+        if not normalized.startswith(opening):
+            raise ValueError(
+                f"Question {index} must start with {opening!r}, got {question.question!r}."
+            )
+
+
+def parse_generated_questions(
+    raw_text: str, *, openings: Sequence[str] | None = None
+) -> list[GeneratedQuestion]:
     """Parse generated QA pairs from model output.
 
     Args:
         raw_text: Raw model output.
+        openings: Optional openings list to validate prefixes.
     Returns:
         List of GeneratedQuestion entries.
     Raises:
@@ -894,6 +1137,8 @@ def parse_generated_questions(raw_text: str) -> list[GeneratedQuestion]:
 
     if not questions:
         raise ValueError("Eval QA output contained no valid questions.")
+    if openings is not None:
+        _validate_question_openings(questions, openings)
     return questions
 
 
@@ -925,6 +1170,115 @@ def _parse_json_payload(raw_text: str) -> object | None:
         except json.JSONDecodeError:
             return None
 
+    return None
+
+
+def _normalize_question_key(question: str) -> str:
+    """Normalize a question for de-duplication."""
+
+    collapsed = re.sub(r"\s+", " ", question.strip().lower())
+    return re.sub(r"[^\w\s]", "", collapsed)
+
+
+def _has_banned_context_reference(question: str) -> bool:
+    """Check whether a question references external context deictically.
+
+    Args:
+        question: Generated question text.
+    Returns:
+        True when the question contains phrases like "in the excerpt".
+    """
+
+    normalized = re.sub(r"\s+", " ", question.strip().lower())
+    return any(phrase in normalized for phrase in _DISALLOWED_QUESTION_PHRASES)
+
+
+def _content_tokens(text: str) -> set[str]:
+    """Extract content-bearing tokens for lexical grounding checks.
+
+    Args:
+        text: Raw text to tokenize.
+    Returns:
+        Lower-cased token set excluding short/common stop words.
+    """
+
+    tokens = re.findall(r"[A-Za-z0-9]+", text.lower())
+    return {
+        token for token in tokens if len(token) >= 3 and token not in _OVERLAP_STOPWORDS
+    }
+
+
+def _has_minimum_grounding_overlap(expected_answer: str, chunk_text: str) -> bool:
+    """Check whether an expected answer is lexically grounded in a chunk.
+
+    Args:
+        expected_answer: Generated reference answer.
+        chunk_text: Source chunk text used for QA generation.
+    Returns:
+        True when the answer shares enough content tokens with the chunk.
+    """
+
+    answer_tokens = _content_tokens(expected_answer)
+    if not answer_tokens:
+        return False
+
+    overlap = len(answer_tokens & _content_tokens(chunk_text))
+    if len(answer_tokens) <= 4:
+        return overlap >= 1
+    return overlap >= 2 and (overlap / len(answer_tokens)) >= 0.25
+
+
+def _validation_error_for_generated_question(
+    question: GeneratedQuestion,
+    *,
+    chunk_text: str,
+) -> str | None:
+    """Validate generated QA quality and return a rejection reason.
+
+    Args:
+        question: Generated QA item.
+        chunk_text: Source chunk text.
+    Returns:
+        None if valid, otherwise a short rejection reason.
+    """
+
+    if _has_banned_context_reference(question.question):
+        return "question is not standalone"
+    if not _has_minimum_grounding_overlap(question.expected_answer, chunk_text):
+        return "expected answer is weakly grounded in chunk text"
+    return None
+
+
+def _validation_error_for_generated_batch(
+    questions: Sequence[GeneratedQuestion],
+    *,
+    chunk_text: str,
+    seen_questions: set[str],
+) -> str | None:
+    """Validate a batch of generated questions.
+
+    Args:
+        questions: Generated questions for one chunk.
+        chunk_text: Source chunk text.
+        seen_questions: Normalized question keys already accepted.
+    Returns:
+        None if valid, otherwise a short rejection reason.
+    """
+
+    seen_batch: set[str] = set()
+    for question in questions:
+        question_key = _normalize_question_key(question.question)
+        if question_key in seen_questions:
+            return "duplicate question in eval set"
+        if question_key in seen_batch:
+            return "duplicate question in batch"
+        rejection_reason = _validation_error_for_generated_question(
+            question,
+            chunk_text=chunk_text,
+        )
+        if rejection_reason is not None:
+            return rejection_reason
+        seen_batch.add(question_key)
     return None
 
 
@@ -1017,11 +1371,13 @@ def generate_eval_set(
     min_chars: int,
     model: str,
     temperature: float,
+    top_p: float,
     max_output_tokens: int,
     request_timeout_s: float,
     max_retries: int,
     prompt_path: Path | None,
     corpus_version: str,
+    openings_plan: Sequence[str] | None,
 ) -> EvalSet:
     """Generate a synthetic eval set from stored chunks.
 
@@ -1034,11 +1390,13 @@ def generate_eval_set(
         min_chars: Minimum chunk text length.
         model: OpenAI model name.
         temperature: Sampling temperature.
+        top_p: Top-p nucleus sampling value.
         max_output_tokens: Completion token limit.
         request_timeout_s: Request timeout in seconds.
         max_retries: Maximum retry attempts.
         prompt_path: Optional prompt template override.
         corpus_version: Corpus version label.
+        openings_plan: Optional list of question openings to enforce.
     Returns:
         Generated EvalSet instance.
     Raises:
@@ -1055,11 +1413,19 @@ def generate_eval_set(
         raise ValueError("min_chars must be > 0")
     if not db_path.exists():
         raise FileNotFoundError(f"Database not found: {db_path}")
+    openings_list: list[str] | None = None
+    if openings_plan is not None:
+        openings_list = [
+            opening.strip() for opening in openings_plan if opening.strip()
+        ]
+        if len(openings_list) < n_questions:
+            raise ValueError("openings_plan must provide at least n_questions entries.")
 
     template = load_eval_prompt_template(prompt_path)
     config = EvalGenerationConfig(
         model=model,
         temperature=temperature,
+        top_p=top_p,
         max_output_tokens=max_output_tokens,
         request_timeout_s=request_timeout_s,
         max_retries=max_retries,
@@ -1077,7 +1443,9 @@ def generate_eval_set(
     rng.shuffle(candidate_uids)
 
     eval_items: list[EvalItem] = []
+    seen_questions: set[str] = set()
     query_index = 1
+    opening_index = 0
 
     with sqlite3.connect(db_path) as conn:
         for chunk_uid in candidate_uids:
@@ -1087,25 +1455,96 @@ def generate_eval_set(
             if chunk is None:
                 continue
 
+            remaining = n_questions - len(eval_items)
+            chunk_question_count = min(questions_per_chunk, remaining)
+            chunk_openings: list[str] | None = None
+            if openings_list is not None:
+                chunk_openings = openings_list[
+                    opening_index : opening_index + chunk_question_count
+                ]
+                if len(chunk_openings) < chunk_question_count:
+                    raise ValueError(
+                        "Not enough openings to cover remaining questions."
+                    )
+
             prompt = render_eval_prompt(
-                template, chunk=chunk, n_questions=questions_per_chunk
+                template,
+                chunk=chunk,
+                n_questions=chunk_question_count,
+                openings=chunk_openings,
             )
             LOGGER.debug(
                 "Eval QA prompt chunk_uid=%s text_chars=%s",
                 chunk.chunk_uid,
                 len(chunk.text),
             )
-            try:
-                result = client.generate_questions(prompt=prompt)
-            except (ValueError, APIError, APITimeoutError, RateLimitError) as exc:
-                LOGGER.warning(
-                    "Eval QA generation failed for %s: %s", chunk.chunk_uid, exc
-                )
-                continue
+            accepted_questions: list[GeneratedQuestion] = []
+            seen_chunk_questions: set[str] = set()
+            for attempt_index in range(_MAX_QA_ATTEMPTS_PER_CHUNK):
+                if len(accepted_questions) >= chunk_question_count:
+                    break
+                try:
+                    result = client.generate_questions(
+                        prompt=prompt,
+                        openings=chunk_openings,
+                    )
+                except (ValueError, APIError, APITimeoutError, RateLimitError) as exc:
+                    LOGGER.warning(
+                        "Eval QA generation failed for %s (attempt %s/%s): %s",
+                        chunk.chunk_uid,
+                        attempt_index + 1,
+                        _MAX_QA_ATTEMPTS_PER_CHUNK,
+                        exc,
+                    )
+                    continue
 
-            for question in result.questions:
+                if chunk_openings is not None:
+                    rejection_reason = _validation_error_for_generated_batch(
+                        result.questions,
+                        chunk_text=chunk.text,
+                        seen_questions=seen_questions,
+                    )
+                    if rejection_reason is not None:
+                        LOGGER.debug(
+                            "Rejected eval QA batch chunk_uid=%s reason=%s",
+                            chunk.chunk_uid,
+                            rejection_reason,
+                        )
+                        continue
+                    accepted_questions = list(result.questions)
+                    break
+
+                for question in result.questions:
+                    if len(accepted_questions) >= chunk_question_count:
+                        break
+                    question_key = _normalize_question_key(question.question)
+                    if question_key in seen_chunk_questions:
+                        continue
+                    if question_key in seen_questions:
+                        continue
+
+                    rejection_reason = _validation_error_for_generated_question(
+                        question,
+                        chunk_text=chunk.text,
+                    )
+                    if rejection_reason is not None:
+                        LOGGER.debug(
+                            "Rejected eval QA chunk_uid=%s reason=%s question=%r",
+                            chunk.chunk_uid,
+                            rejection_reason,
+                            question.question,
+                        )
+                        continue
+
+                    seen_chunk_questions.add(question_key)
+                    seen_questions.add(question_key)
+                    accepted_questions.append(question)
+
+            for question in accepted_questions:
                 if len(eval_items) >= n_questions:
                     break
+                question_key = _normalize_question_key(question.question)
+                seen_questions.add(question_key)
                 query_id = f"q{query_index:03d}"
                 query_index += 1
                 eval_items.append(
@@ -1122,6 +1561,8 @@ def generate_eval_set(
                         reference_answer=question.expected_answer,
                     )
                 )
+            if chunk_openings is not None:
+                opening_index += len(accepted_questions)
 
     if len(eval_items) < n_questions:
         raise ValueError(
@@ -1301,6 +1742,13 @@ def run_eval(
     generate: bool,
     generate_model: str,
     generation_top_k: int,
+    generation_rerank: Literal["none", "lexical"] = "none",
+    generation_select_evidence: bool = False,
+    generation_select_k: int = 3,
+    generation_quote_first: bool = False,
+    generation_cite_chunk_index: bool = False,
+    generation_repair_citations: bool = False,
+    generation_repair_max_attempts: int = 1,
     generation_concurrency: int = 4,
     cache_db_path: Path | None = None,
 ) -> EvalReport:
@@ -1313,6 +1761,13 @@ def run_eval(
         generate: Whether to run generation and compute citation accuracy.
         generate_model: Model name for answer generation.
         generation_top_k: Number of chunks to pass to the generator.
+        generation_rerank: Rerank strategy for generation chunks.
+        generation_select_evidence: Whether to select evidence chunks before answering.
+        generation_select_k: Max chunks to keep when selection is enabled.
+        generation_quote_first: Whether to force quote-first generation.
+        generation_cite_chunk_index: Whether to force chunk-index citations.
+        generation_repair_citations: Whether to repair missing/invalid citations.
+        generation_repair_max_attempts: Max attempts for citation repair.
         generation_concurrency: Maximum concurrent generation requests.
         cache_db_path: Optional SQLite cache path for embeddings/answers.
     Returns:
@@ -1328,10 +1783,27 @@ def run_eval(
         raise ValueError("generation_top_k must be > 0")
     if generation_concurrency <= 0:
         raise ValueError("generation_concurrency must be > 0")
+    if generation_select_k <= 0:
+        raise ValueError("generation_select_k must be > 0")
+    if generation_repair_max_attempts <= 0:
+        raise ValueError("generation_repair_max_attempts must be > 0")
+    if generation_cite_chunk_index and generation_quote_first:
+        raise ValueError(
+            "generation_cite_chunk_index and generation_quote_first cannot both be True."
+        )
 
     cache = EvalCache(cache_db_path) if cache_db_path is not None else None
     prompt_version = (
-        _compute_prompt_version() if generate and cache is not None else None
+        _compute_prompt_version(
+            generation_select_evidence=generation_select_evidence,
+            generation_select_k=generation_select_k,
+            generation_quote_first=generation_quote_first,
+            generation_cite_chunk_index=generation_cite_chunk_index,
+            generation_repair_citations=generation_repair_citations,
+            generation_repair_max_attempts=generation_repair_max_attempts,
+        )
+        if generate and cache is not None
+        else None
     )
     embeddings_client: CachedEmbeddingsClient | None = None
     chroma_config: ChromaConfig | None = None
@@ -1396,6 +1868,13 @@ def run_eval(
                 db_path=db_path,
                 generate_model=generate_model,
                 generation_top_k=generation_top_k,
+                generation_rerank=generation_rerank,
+                generation_select_evidence=generation_select_evidence,
+                generation_select_k=generation_select_k,
+                generation_quote_first=generation_quote_first,
+                generation_cite_chunk_index=generation_cite_chunk_index,
+                generation_repair_citations=generation_repair_citations,
+                generation_repair_max_attempts=generation_repair_max_attempts,
                 generation_concurrency=generation_concurrency,
                 cache=cache,
                 prompt_version=prompt_version,
@@ -1418,6 +1897,15 @@ def run_eval(
             citation_accuracy=computation.citation_accuracy,
             citation_error=computation.citation_error,
             generation_error=computation.generation_error,
+            ground_truth_in_generation_context=(
+                computation.ground_truth_in_generation_context
+            ),
+            citations_in_generation_context=(
+                computation.citations_in_generation_context
+            ),
+            citations_outside_generation_context=(
+                computation.citations_outside_generation_context
+            ),
             warnings=computation.warnings,
         )
         for computation in computations
@@ -1460,6 +1948,13 @@ def _run_generation_stage(
     db_path: Path,
     generate_model: str,
     generation_top_k: int,
+    generation_rerank: Literal["none", "lexical"],
+    generation_select_evidence: bool,
+    generation_select_k: int,
+    generation_quote_first: bool,
+    generation_cite_chunk_index: bool,
+    generation_repair_citations: bool,
+    generation_repair_max_attempts: int,
     generation_concurrency: int,
     cache: EvalCache | None,
     prompt_version: str | None,
@@ -1471,6 +1966,13 @@ def _run_generation_stage(
         db_path: SQLite database path for citation scoring.
         generate_model: Generation model name.
         generation_top_k: Number of chunks to pass to generation.
+        generation_rerank: Rerank strategy for generation chunks.
+        generation_select_evidence: Whether to select evidence chunks before answering.
+        generation_select_k: Max chunks to keep when selection is enabled.
+        generation_quote_first: Whether to force quote-first generation.
+        generation_cite_chunk_index: Whether to force chunk-index citations.
+        generation_repair_citations: Whether to repair missing/invalid citations.
+        generation_repair_max_attempts: Max attempts for citation repair.
         generation_concurrency: Maximum number of in-flight generation requests.
         cache: Optional eval cache.
         prompt_version: Prompt hash for generated answer cache keys.
@@ -1491,6 +1993,13 @@ def _run_generation_stage(
                 db_path=db_path,
                 generate_model=generate_model,
                 generation_top_k=generation_top_k,
+                generation_rerank=generation_rerank,
+                generation_select_evidence=generation_select_evidence,
+                generation_select_k=generation_select_k,
+                generation_quote_first=generation_quote_first,
+                generation_cite_chunk_index=generation_cite_chunk_index,
+                generation_repair_citations=generation_repair_citations,
+                generation_repair_max_attempts=generation_repair_max_attempts,
                 cache=cache,
                 prompt_version=prompt_version,
             )
@@ -1502,6 +2011,13 @@ def _run_generation_stage(
             db_path=db_path,
             generate_model=generate_model,
             generation_top_k=generation_top_k,
+            generation_rerank=generation_rerank,
+            generation_select_evidence=generation_select_evidence,
+            generation_select_k=generation_select_k,
+            generation_quote_first=generation_quote_first,
+            generation_cite_chunk_index=generation_cite_chunk_index,
+            generation_repair_citations=generation_repair_citations,
+            generation_repair_max_attempts=generation_repair_max_attempts,
             generation_concurrency=generation_concurrency,
             cache=cache,
             prompt_version=prompt_version,
@@ -1525,6 +2041,13 @@ async def _run_generation_stage_async(
     db_path: Path,
     generate_model: str,
     generation_top_k: int,
+    generation_rerank: Literal["none", "lexical"],
+    generation_select_evidence: bool,
+    generation_select_k: int,
+    generation_quote_first: bool,
+    generation_cite_chunk_index: bool,
+    generation_repair_citations: bool,
+    generation_repair_max_attempts: int,
     generation_concurrency: int,
     cache: EvalCache | None,
     prompt_version: str | None,
@@ -1536,6 +2059,13 @@ async def _run_generation_stage_async(
         db_path: SQLite database path for citation scoring.
         generate_model: Generation model name.
         generation_top_k: Number of chunks to pass to generation.
+        generation_rerank: Rerank strategy for generation chunks.
+        generation_select_evidence: Whether to select evidence chunks before answering.
+        generation_select_k: Max chunks to keep when selection is enabled.
+        generation_quote_first: Whether to force quote-first generation.
+        generation_cite_chunk_index: Whether to force chunk-index citations.
+        generation_repair_citations: Whether to repair missing/invalid citations.
+        generation_repair_max_attempts: Max attempts for citation repair.
         generation_concurrency: Maximum number of in-flight generation requests.
         cache: Optional eval cache.
         prompt_version: Prompt hash for generated answer cache keys.
@@ -1549,6 +2079,13 @@ async def _run_generation_stage_async(
             db_path=db_path,
             generate_model=generate_model,
             generation_top_k=generation_top_k,
+            generation_rerank=generation_rerank,
+            generation_select_evidence=generation_select_evidence,
+            generation_select_k=generation_select_k,
+            generation_quote_first=generation_quote_first,
+            generation_cite_chunk_index=generation_cite_chunk_index,
+            generation_repair_citations=generation_repair_citations,
+            generation_repair_max_attempts=generation_repair_max_attempts,
             cache=cache,
             prompt_version=prompt_version,
             semaphore=semaphore,
@@ -1565,6 +2102,13 @@ async def _generate_for_computation(
     db_path: Path,
     generate_model: str,
     generation_top_k: int,
+    generation_rerank: Literal["none", "lexical"],
+    generation_select_evidence: bool,
+    generation_select_k: int,
+    generation_quote_first: bool,
+    generation_cite_chunk_index: bool,
+    generation_repair_citations: bool,
+    generation_repair_max_attempts: int,
     cache: EvalCache | None,
     prompt_version: str | None,
     semaphore: asyncio.Semaphore,
@@ -1579,7 +2123,17 @@ async def _generate_for_computation(
     generation_chunks = _build_generation_chunks(
         computation.retrieval_results,
         generation_top_k,
+        query=computation.item.query,
+        generation_rerank=generation_rerank,
     )
+    generation_chunk_uids = {chunk.chunk_uid for chunk in generation_chunks}
+    computation.ground_truth_in_generation_context = bool(
+        generation_chunk_uids
+        & {uid for uid in computation.item.ground_truth.chunk_uids if uid}
+    )
+    generation_pages = {
+        (chunk.paper_id, chunk.page_number) for chunk in generation_chunks
+    }
     chunk_uids_hash = _hash_chunk_uids(generation_chunks)
     cache_key = _build_generation_cache_key(
         query=computation.item.query,
@@ -1611,6 +2165,12 @@ async def _generate_for_computation(
                     computation=computation,
                     generate_model=generate_model,
                     generation_chunks=generation_chunks,
+                    generation_select_evidence=generation_select_evidence,
+                    generation_select_k=generation_select_k,
+                    generation_quote_first=generation_quote_first,
+                    generation_cite_chunk_index=generation_cite_chunk_index,
+                    generation_repair_citations=generation_repair_citations,
+                    generation_repair_max_attempts=generation_repair_max_attempts,
                     semaphore=semaphore,
                 )
                 if answer is not None:
@@ -1626,6 +2186,12 @@ async def _generate_for_computation(
             computation=computation,
             generate_model=generate_model,
             generation_chunks=generation_chunks,
+            generation_select_evidence=generation_select_evidence,
+            generation_select_k=generation_select_k,
+            generation_quote_first=generation_quote_first,
+            generation_cite_chunk_index=generation_cite_chunk_index,
+            generation_repair_citations=generation_repair_citations,
+            generation_repair_max_attempts=generation_repair_max_attempts,
             semaphore=semaphore,
         )
 
@@ -1635,6 +2201,15 @@ async def _generate_for_computation(
     try:
         citations = parse_citations(answer)
         computation.citation_count = len(citations)
+        citations_in_context = sum(
+            1
+            for citation in citations
+            if (citation.paper_id, citation.page_number) in generation_pages
+        )
+        computation.citations_in_generation_context = citations_in_context
+        computation.citations_outside_generation_context = (
+            len(citations) - citations_in_context
+        )
         computation.citation_accuracy = _score_citations_for_item(
             citations,
             ground_truth_chunk_uids=computation.item.ground_truth.chunk_uids,
@@ -1650,6 +2225,13 @@ def _generate_for_computation_sync(
     db_path: Path,
     generate_model: str,
     generation_top_k: int,
+    generation_rerank: Literal["none", "lexical"],
+    generation_select_evidence: bool,
+    generation_select_k: int,
+    generation_quote_first: bool,
+    generation_cite_chunk_index: bool,
+    generation_repair_citations: bool,
+    generation_repair_max_attempts: int,
     cache: EvalCache | None,
     prompt_version: str | None,
 ) -> None:
@@ -1658,7 +2240,17 @@ def _generate_for_computation_sync(
     generation_chunks = _build_generation_chunks(
         computation.retrieval_results,
         generation_top_k,
+        query=computation.item.query,
+        generation_rerank=generation_rerank,
     )
+    generation_chunk_uids = {chunk.chunk_uid for chunk in generation_chunks}
+    computation.ground_truth_in_generation_context = bool(
+        generation_chunk_uids
+        & {uid for uid in computation.item.ground_truth.chunk_uids if uid}
+    )
+    generation_pages = {
+        (chunk.paper_id, chunk.page_number) for chunk in generation_chunks
+    }
     chunk_uids_hash = _hash_chunk_uids(generation_chunks)
     cache_key = _build_generation_cache_key(
         query=computation.item.query,
@@ -1681,6 +2273,12 @@ def _generate_for_computation_sync(
             computation=computation,
             generate_model=generate_model,
             generation_chunks=generation_chunks,
+            generation_select_evidence=generation_select_evidence,
+            generation_select_k=generation_select_k,
+            generation_quote_first=generation_quote_first,
+            generation_cite_chunk_index=generation_cite_chunk_index,
+            generation_repair_citations=generation_repair_citations,
+            generation_repair_max_attempts=generation_repair_max_attempts,
         )
         if answer is not None and cache is not None and cache_key is not None:
             cache.set_generated_answer(
@@ -1697,6 +2295,15 @@ def _generate_for_computation_sync(
     try:
         citations = parse_citations(answer)
         computation.citation_count = len(citations)
+        citations_in_context = sum(
+            1
+            for citation in citations
+            if (citation.paper_id, citation.page_number) in generation_pages
+        )
+        computation.citations_in_generation_context = citations_in_context
+        computation.citations_outside_generation_context = (
+            len(citations) - citations_in_context
+        )
         computation.citation_accuracy = _score_citations_for_item(
             citations,
             ground_truth_chunk_uids=computation.item.ground_truth.chunk_uids,
@@ -1711,6 +2318,12 @@ def _generate_answer_sync(
     computation: _EvalComputation,
     generate_model: str,
     generation_chunks: list[GenerationChunk],
+    generation_select_evidence: bool,
+    generation_select_k: int,
+    generation_quote_first: bool,
+    generation_cite_chunk_index: bool,
+    generation_repair_citations: bool,
+    generation_repair_max_attempts: int,
 ) -> str | None:
     """Generate an answer synchronously and capture generation errors."""
 
@@ -1719,6 +2332,12 @@ def _generate_answer_sync(
             computation.item.query,
             generation_chunks,
             model=generate_model,
+            select_evidence=generation_select_evidence,
+            selection_max_chunks=generation_select_k,
+            quote_first=generation_quote_first,
+            cite_chunk_index=generation_cite_chunk_index,
+            repair_citations=generation_repair_citations,
+            repair_max_attempts=generation_repair_max_attempts,
         )
     except ValueError as exc:
         computation.generation_error = str(exc)
@@ -1732,6 +2351,12 @@ async def _generate_answer_with_semaphore(
     computation: _EvalComputation,
     generate_model: str,
     generation_chunks: list[GenerationChunk],
+    generation_select_evidence: bool,
+    generation_select_k: int,
+    generation_quote_first: bool,
+    generation_cite_chunk_index: bool,
+    generation_repair_citations: bool,
+    generation_repair_max_attempts: int,
     semaphore: asyncio.Semaphore,
 ) -> str | None:
     """Generate an answer under a concurrency semaphore.
@@ -1752,6 +2377,12 @@ async def _generate_answer_with_semaphore(
                 computation.item.query,
                 generation_chunks,
                 generate_model,
+                select_evidence=generation_select_evidence,
+                selection_max_chunks=generation_select_k,
+                quote_first=generation_quote_first,
+                cite_chunk_index=generation_cite_chunk_index,
+                repair_citations=generation_repair_citations,
+                repair_max_attempts=generation_repair_max_attempts,
             )
         except ValueError as exc:
             computation.generation_error = str(exc)
@@ -1785,8 +2416,9 @@ def _run_retrieval(
     """Run retrieval for evaluation."""
 
     warnings: list[str] = []
+    results: list[ChunkResult | HybridChunkResult] = []
     if retrieval_config.mode == "fts":
-        results = search_fts(query, top_k=retrieval_config.top_k, db_path=db_path)
+        results = list(search_fts(query, top_k=retrieval_config.top_k, db_path=db_path))
     elif retrieval_config.mode == "vector":
         active_embeddings_client = embeddings_client or CachedEmbeddingsClient(
             base_client=EmbeddingsClient(
@@ -1800,12 +2432,14 @@ def _run_retrieval(
             distance=retrieval_config.distance,
         )
         try:
-            results = search_vector_chroma(
-                query,
-                top_k=retrieval_config.top_k,
-                db_path=db_path,
-                embeddings_client=active_embeddings_client,
-                chroma_config=active_chroma_config,
+            results = list(
+                search_vector_chroma(
+                    query,
+                    top_k=retrieval_config.top_k,
+                    db_path=db_path,
+                    embeddings_client=active_embeddings_client,
+                    chroma_config=active_chroma_config,
+                )
             )
         except ImportError as exc:
             raise ValueError(str(exc)) from exc
@@ -1832,16 +2466,40 @@ def _run_retrieval(
             vector_weight=retrieval_config.rrf_weight_vector,
         )
         warnings.extend(output.warnings)
-        results = output.results
+        results = list(output.results)
 
     return results, warnings
 
 
-def _compute_prompt_version() -> str:
+def _compute_prompt_version(
+    *,
+    generation_select_evidence: bool,
+    generation_select_k: int,
+    generation_quote_first: bool,
+    generation_cite_chunk_index: bool,
+    generation_repair_citations: bool,
+    generation_repair_max_attempts: int,
+) -> str:
     """Compute a stable prompt version hash for generation cache keys."""
 
-    prompt_template = load_prompt_template()
-    return sha256(prompt_template.encode("utf-8")).hexdigest()
+    payload_parts = [load_prompt_template()]
+    payload_parts.append(f"selection_enabled={generation_select_evidence}")
+    payload_parts.append(f"selection_max_chunks={generation_select_k}")
+    payload_parts.append(f"quote_first_enabled={generation_quote_first}")
+    payload_parts.append(f"chunk_citation_enabled={generation_cite_chunk_index}")
+    payload_parts.append(f"repair_enabled={generation_repair_citations}")
+    payload_parts.append(f"repair_max_attempts={generation_repair_max_attempts}")
+    if generation_select_evidence:
+        payload_parts.append(load_selection_prompt_template())
+    if generation_quote_first:
+        payload_parts.append(load_quote_selection_prompt_template())
+        payload_parts.append(load_quote_first_prompt_template())
+    if generation_cite_chunk_index:
+        payload_parts.append(load_chunk_citation_prompt_template())
+    if generation_repair_citations:
+        payload_parts.append(load_repair_prompt_template())
+    payload = "\n".join(payload_parts)
+    return sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _hash_chunk_uids(chunks: Sequence[GenerationChunk]) -> str:
@@ -1854,27 +2512,33 @@ def _hash_chunk_uids(chunks: Sequence[GenerationChunk]) -> str:
 def _build_generation_chunks(
     results: Sequence[ChunkResult | HybridChunkResult],
     top_k: int,
+    *,
+    query: str,
+    generation_rerank: Literal["none", "lexical"],
 ) -> list[GenerationChunk]:
     """Build generation chunks from retrieval results.
 
     Args:
         results: Retrieved chunk results.
         top_k: Number of chunks to include.
+        query: User query text used for reranking.
+        generation_rerank: Rerank strategy for generation chunks.
     Returns:
         List of GenerationChunk entries.
     """
 
-    chunks: list[GenerationChunk] = []
-    for result in results[:top_k]:
-        chunks.append(
-            GenerationChunk(
-                chunk_uid=result.chunk_uid,
-                paper_id=result.paper_id,
-                page_number=result.page_number,
-                text=result.text,
-            )
+    if generation_rerank == "lexical":
+        results = rerank_results_for_generation(query, results)
+
+    return [
+        GenerationChunk(
+            chunk_uid=result.chunk_uid,
+            paper_id=result.paper_id,
+            page_number=result.page_number,
+            text=result.text,
         )
-    return chunks
+        for result in results[:top_k]
+    ]
 
 
 def _score_citations_for_item(
@@ -1900,29 +2564,35 @@ def _score_citations_for_item(
 def _summarize_failures(results: Sequence[EvalItemResult]) -> EvalFailureSummary:
     """Aggregate failure modes from per-item results."""
 
-    retrieval_empty = sum(1 for item in results if not item.retrieved_chunk_uids)
-    recall_at_5_zero = sum(1 for item in results if item.recall_at_5 == 0.0)
-    mrr_zero = sum(1 for item in results if item.mrr == 0.0)
-    citation_absent = sum(
-        1
-        for item in results
-        if item.citation_count is not None and item.citation_count == 0
+    retrieval_empty = len([item for item in results if not item.retrieved_chunk_uids])
+    recall_at_5_zero = len([item for item in results if item.recall_at_5 == 0.0])
+    mrr_zero = len([item for item in results if item.mrr == 0.0])
+    citation_absent = len(
+        [
+            item
+            for item in results
+            if item.citation_count is not None and item.citation_count == 0
+        ]
     )
-    citation_zero_score = sum(
-        1
-        for item in results
-        if (
-            item.citation_accuracy is not None
-            and item.citation_count is not None
-            and item.citation_count > 0
-            and item.citation_accuracy == 0.0
-        )
+    citation_zero_score = len(
+        [
+            item
+            for item in results
+            if (
+                item.citation_accuracy is not None
+                and item.citation_count is not None
+                and item.citation_count > 0
+                and item.citation_accuracy == 0.0
+            )
+        ]
     )
-    citation_parse_error = sum(1 for item in results if item.citation_error)
-    citation_inaccurate = sum(
-        1
-        for item in results
-        if item.citation_accuracy is not None and item.citation_accuracy < 1.0
+    citation_parse_error = len([item for item in results if item.citation_error])
+    citation_inaccurate = len(
+        [
+            item
+            for item in results
+            if item.citation_accuracy is not None and item.citation_accuracy < 1.0
+        ]
     )
 
     return EvalFailureSummary(
@@ -1939,9 +2609,7 @@ def _summarize_failures(results: Sequence[EvalItemResult]) -> EvalFailureSummary
 def _mean(values: Sequence[float]) -> float:
     """Compute the mean of a list of floats."""
 
-    if not values:
-        return 0.0
-    return sum(values) / len(values)
+    return sum(values) / len(values) if values else 0.0
 
 
 def render_report_markdown(report: EvalReport) -> str:
@@ -1987,18 +2655,53 @@ def render_report_markdown(report: EvalReport) -> str:
         ]
     )
 
-    worst = [item for item in report.items if item.recall_at_5 == 0.0][:5]
-    if worst:
-        lines.extend(["", "## Example Misses (Recall@5 = 0)"])
-        for item in worst:
-            lines.append(f"- {item.query_id}: {item.query}")
-
-    diagnostics = [
+    context_items = [
         item
         for item in report.items
-        if item.recall_at_5 == 0.0 or item.citation_error or item.generation_error
+        if item.ground_truth_in_generation_context is not None
     ]
-    if diagnostics:
+    if context_items:
+        gt_missing = len(
+            [
+                item
+                for item in context_items
+                if not item.ground_truth_in_generation_context
+            ]
+        )
+        citations_outside = len(
+            [
+                item
+                for item in context_items
+                if item.citations_outside_generation_context
+                and item.citations_outside_generation_context > 0
+            ]
+        )
+        lines.extend(
+            [
+                "",
+                "## Generation Context Diagnostics",
+                f"- Ground truth missing from generation context: {gt_missing}",
+                f"- Citations outside generation context: {citations_outside}",
+            ]
+        )
+
+    if worst := [item for item in report.items if item.recall_at_5 == 0.0][:5]:
+        lines.extend(["", "## Example Misses (Recall@5 = 0)"])
+        lines.extend(f"- {item.query_id}: {item.query}" for item in worst)
+
+    if diagnostics := [
+        item
+        for item in report.items
+        if item.recall_at_5 == 0.0
+        or item.citation_error
+        or item.generation_error
+        or item.citation_count == 0
+        or item.ground_truth_in_generation_context is False
+        or (
+            item.citations_outside_generation_context is not None
+            and item.citations_outside_generation_context > 0
+        )
+    ]:
         lines.extend(["", "## Per-Query Diagnostics"])
         for item in diagnostics:
             parts = [
@@ -2010,6 +2713,13 @@ def render_report_markdown(report: EvalReport) -> str:
                 parts.append(f"citation_error={item.citation_error}")
             if item.generation_error:
                 parts.append(f"generation_error={item.generation_error}")
+            if item.ground_truth_in_generation_context is not None:
+                parts.append(f"gt_in_gen_ctx={item.ground_truth_in_generation_context}")
+            if item.citations_outside_generation_context is not None:
+                parts.append(
+                    "citations_outside_gen_ctx="
+                    f"{item.citations_outside_generation_context}"
+                )
             lines.append(f"- {item.query_id}: {item.query} ({', '.join(parts)})")
 
     return "\n".join(lines)

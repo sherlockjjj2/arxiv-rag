@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from dataclasses import dataclass
@@ -27,7 +28,26 @@ LOGGER = logging.getLogger(__name__)
 _DEFAULT_PROMPT_PATH = (
     Path(__file__).resolve().parent / "prompts" / "generate_with_citations.txt"
 )
+_DEFAULT_CHUNK_CITATION_PROMPT_PATH = (
+    Path(__file__).resolve().parent / "prompts" / "generate_with_chunk_citations.txt"
+)
+_DEFAULT_SELECTION_PROMPT_PATH = (
+    Path(__file__).resolve().parent / "prompts" / "select_evidence.txt"
+)
+_DEFAULT_QUOTE_SELECTION_PROMPT_PATH = (
+    Path(__file__).resolve().parent / "prompts" / "select_quote.txt"
+)
+_DEFAULT_REPAIR_PROMPT_PATH = (
+    Path(__file__).resolve().parent / "prompts" / "repair_citations.txt"
+)
+_DEFAULT_QUOTE_FIRST_PROMPT_PATH = (
+    Path(__file__).resolve().parent / "prompts" / "generate_quote_first.txt"
+)
 _MIN_QUOTE_OVERLAP = 0.6
+_SELECTION_MAX_OUTPUT_TOKENS = 300
+_QUOTE_SELECTION_MAX_OUTPUT_TOKENS = 300
+_REPAIR_MAX_OUTPUT_TOKENS = 1200
+_CHUNK_CITATION_PATTERN = re.compile(r"\[chunk:(?P<index>\d+)\]", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -192,6 +212,36 @@ def load_prompt_template(path: Path | None = None) -> str:
     return template
 
 
+def load_chunk_citation_prompt_template(path: Path | None = None) -> str:
+    """Load the chunk-citation prompt template from disk.
+
+    Args:
+        path: Optional override for the prompt template path.
+    Returns:
+        Prompt template text.
+    Raises:
+        FileNotFoundError: If the prompt file does not exist.
+        ValueError: If the prompt template is empty.
+    """
+
+    if path is not None:
+        prompt_path = path
+        if not prompt_path.exists():
+            raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
+        template = prompt_path.read_text(encoding="utf-8")
+    else:
+        template = _load_packaged_prompt("generate_with_chunk_citations.txt")
+        if template is None:
+            prompt_path = _DEFAULT_CHUNK_CITATION_PROMPT_PATH
+            if not prompt_path.exists():
+                raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
+            template = prompt_path.read_text(encoding="utf-8")
+    if not template.strip():
+        location = path or _DEFAULT_CHUNK_CITATION_PROMPT_PATH
+        raise ValueError(f"Prompt template is empty: {location}")
+    return template
+
+
 def _load_packaged_prompt_template() -> str | None:
     """Load the prompt template from package resources.
 
@@ -209,6 +259,144 @@ def _load_packaged_prompt_template() -> str | None:
     except (FileNotFoundError, ModuleNotFoundError, AttributeError):
         return None
     return None
+
+
+def _load_packaged_prompt(name: str) -> str | None:
+    """Load a prompt template from packaged resources.
+
+    Args:
+        name: Prompt filename under arxiv_rag/prompts.
+    Returns:
+        Prompt template string if found, otherwise None.
+    """
+
+    try:
+        resource = resources.files("arxiv_rag").joinpath("prompts", name)
+        if resource.is_file():
+            return resource.read_text(encoding="utf-8")
+    except (FileNotFoundError, ModuleNotFoundError, AttributeError):
+        return None
+    return None
+
+
+def load_selection_prompt_template(path: Path | None = None) -> str:
+    """Load the evidence-selection prompt template from disk.
+
+    Args:
+        path: Optional override for the prompt template path.
+    Returns:
+        Prompt template text.
+    Raises:
+        FileNotFoundError: If the prompt file does not exist.
+        ValueError: If the prompt template is empty.
+    """
+
+    if path is not None:
+        prompt_path = path
+        if not prompt_path.exists():
+            raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
+        template = prompt_path.read_text(encoding="utf-8")
+    else:
+        template = _load_packaged_prompt("select_evidence.txt")
+        if template is None:
+            prompt_path = _DEFAULT_SELECTION_PROMPT_PATH
+            if not prompt_path.exists():
+                raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
+            template = prompt_path.read_text(encoding="utf-8")
+    if not template.strip():
+        location = path or _DEFAULT_SELECTION_PROMPT_PATH
+        raise ValueError(f"Prompt template is empty: {location}")
+    return template
+
+
+def load_quote_selection_prompt_template(path: Path | None = None) -> str:
+    """Load the quote-selection prompt template from disk.
+
+    Args:
+        path: Optional override for the prompt template path.
+    Returns:
+        Prompt template text.
+    Raises:
+        FileNotFoundError: If the prompt file does not exist.
+        ValueError: If the prompt template is empty.
+    """
+
+    if path is not None:
+        prompt_path = path
+        if not prompt_path.exists():
+            raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
+        template = prompt_path.read_text(encoding="utf-8")
+    else:
+        template = _load_packaged_prompt("select_quote.txt")
+        if template is None:
+            prompt_path = _DEFAULT_QUOTE_SELECTION_PROMPT_PATH
+            if not prompt_path.exists():
+                raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
+            template = prompt_path.read_text(encoding="utf-8")
+    if not template.strip():
+        location = path or _DEFAULT_QUOTE_SELECTION_PROMPT_PATH
+        raise ValueError(f"Prompt template is empty: {location}")
+    return template
+
+
+def load_quote_first_prompt_template(path: Path | None = None) -> str:
+    """Load the quote-first generation prompt template from disk.
+
+    Args:
+        path: Optional override for the prompt template path.
+    Returns:
+        Prompt template text.
+    Raises:
+        FileNotFoundError: If the prompt file does not exist.
+        ValueError: If the prompt template is empty.
+    """
+
+    if path is not None:
+        prompt_path = path
+        if not prompt_path.exists():
+            raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
+        template = prompt_path.read_text(encoding="utf-8")
+    else:
+        template = _load_packaged_prompt("generate_quote_first.txt")
+        if template is None:
+            prompt_path = _DEFAULT_QUOTE_FIRST_PROMPT_PATH
+            if not prompt_path.exists():
+                raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
+            template = prompt_path.read_text(encoding="utf-8")
+    if not template.strip():
+        location = path or _DEFAULT_QUOTE_FIRST_PROMPT_PATH
+        raise ValueError(f"Prompt template is empty: {location}")
+    return template
+
+
+def load_repair_prompt_template(path: Path | None = None) -> str:
+    """Load the citation-repair prompt template from disk.
+
+    Args:
+        path: Optional override for the prompt template path.
+    Returns:
+        Prompt template text.
+    Raises:
+        FileNotFoundError: If the prompt file does not exist.
+        ValueError: If the prompt template is empty.
+    """
+
+    if path is not None:
+        prompt_path = path
+        if not prompt_path.exists():
+            raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
+        template = prompt_path.read_text(encoding="utf-8")
+    else:
+        template = _load_packaged_prompt("repair_citations.txt")
+        if template is None:
+            prompt_path = _DEFAULT_REPAIR_PROMPT_PATH
+            if not prompt_path.exists():
+                raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
+            template = prompt_path.read_text(encoding="utf-8")
+    if not template.strip():
+        location = path or _DEFAULT_REPAIR_PROMPT_PATH
+        raise ValueError(f"Prompt template is empty: {location}")
+    return template
 
 
 def validate_chunks(chunks: Sequence[Chunk]) -> None:
@@ -271,6 +459,338 @@ def render_prompt(template: str, chunks_text: str) -> str:
     if "{chunks}" not in template:
         raise ValueError("Prompt template missing '{chunks}' placeholder")
     return template.replace("{chunks}", chunks_text)
+
+
+def render_chunk_citation_prompt(template: str, chunks_text: str) -> str:
+    """Render the chunk-citation prompt with formatted chunk context.
+
+    Args:
+        template: Prompt template text containing a "{chunks}" placeholder.
+        chunks_text: Formatted chunk context.
+    Returns:
+        Rendered prompt string.
+    Raises:
+        ValueError: If the template does not contain the placeholder.
+    """
+
+    if "{chunks}" not in template:
+        raise ValueError("Chunk citation prompt missing '{chunks}' placeholder")
+    return template.replace("{chunks}", chunks_text)
+
+
+def render_selection_prompt(
+    template: str,
+    chunks_text: str,
+    *,
+    query: str,
+    max_chunks: int,
+) -> str:
+    """Render the evidence-selection prompt template.
+
+    Args:
+        template: Prompt template text.
+        chunks_text: Formatted chunk context.
+        query: User question text.
+        max_chunks: Maximum number of chunks to select.
+    Returns:
+        Rendered prompt string.
+    Raises:
+        ValueError: If required placeholders are missing.
+    """
+
+    if "{chunks}" not in template:
+        raise ValueError("Selection prompt missing '{chunks}' placeholder")
+    if "{query}" not in template:
+        raise ValueError("Selection prompt missing '{query}' placeholder")
+    if "{max_chunks}" not in template:
+        raise ValueError("Selection prompt missing '{max_chunks}' placeholder")
+    return template.format(chunks=chunks_text, query=query, max_chunks=max_chunks)
+
+
+def render_repair_prompt(
+    template: str,
+    chunks_text: str,
+    *,
+    query: str,
+    answer: str,
+) -> str:
+    """Render the citation-repair prompt template.
+
+    Args:
+        template: Prompt template text.
+        chunks_text: Formatted chunk context.
+        query: User question text.
+        answer: Answer text to repair.
+    Returns:
+        Rendered prompt string.
+    Raises:
+        ValueError: If required placeholders are missing.
+    """
+
+    if "{chunks}" not in template:
+        raise ValueError("Repair prompt missing '{chunks}' placeholder")
+    if "{query}" not in template:
+        raise ValueError("Repair prompt missing '{query}' placeholder")
+    if "{answer}" not in template:
+        raise ValueError("Repair prompt missing '{answer}' placeholder")
+    return template.format(chunks=chunks_text, query=query, answer=answer)
+
+
+def render_quote_selection_prompt(
+    template: str,
+    chunks_text: str,
+    *,
+    query: str,
+) -> str:
+    """Render the quote-selection prompt template.
+
+    Args:
+        template: Prompt template text.
+        chunks_text: Formatted chunk context.
+        query: User question text.
+    Returns:
+        Rendered prompt string.
+    Raises:
+        ValueError: If required placeholders are missing.
+    """
+
+    if "{chunks}" not in template:
+        raise ValueError("Quote selection prompt missing '{chunks}' placeholder")
+    if "{query}" not in template:
+        raise ValueError("Quote selection prompt missing '{query}' placeholder")
+    return template.format(chunks=chunks_text, query=query)
+
+
+def render_quote_first_prompt(
+    template: str,
+    chunks_text: str,
+    *,
+    query: str,
+    quote: str,
+) -> str:
+    """Render the quote-first generation prompt template.
+
+    Args:
+        template: Prompt template text.
+        chunks_text: Formatted chunk context.
+        query: User question text.
+        quote: Selected verbatim quote to include in the answer.
+    Returns:
+        Rendered prompt string.
+    Raises:
+        ValueError: If required placeholders are missing.
+    """
+
+    if "{chunks}" not in template:
+        raise ValueError("Quote-first prompt missing '{chunks}' placeholder")
+    if "{query}" not in template:
+        raise ValueError("Quote-first prompt missing '{query}' placeholder")
+    if "{quote}" not in template:
+        raise ValueError("Quote-first prompt missing '{quote}' placeholder")
+    return template.format(chunks=chunks_text, query=query, quote=quote)
+
+
+def _parse_selection_indices(selection_text: str, *, max_index: int) -> list[int]:
+    """Parse chunk indices from selection output.
+
+    Args:
+        selection_text: Raw model output for selection.
+        max_index: Maximum allowed index.
+    Returns:
+        Ordered list of unique indices within [1, max_index].
+    """
+
+    if not selection_text.strip():
+        return []
+
+    candidates: list[int] = []
+    try:
+        payload = json.loads(selection_text)
+    except json.JSONDecodeError:
+        payload = None
+
+    if payload is None:
+        start = selection_text.find("{")
+        end = selection_text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            snippet = selection_text[start : end + 1]
+            try:
+                payload = json.loads(snippet)
+            except json.JSONDecodeError:
+                payload = None
+
+    if isinstance(payload, dict):
+        selected = payload.get("selected")
+        if isinstance(selected, list):
+            for item in selected:
+                if isinstance(item, int):
+                    candidates.append(item)
+                elif isinstance(item, str) and item.isdigit():
+                    candidates.append(int(item))
+
+    if not candidates:
+        for match in re.findall(r"\d+", selection_text):
+            candidates.append(int(match))
+
+    seen: set[int] = set()
+    indices: list[int] = []
+    for idx in candidates:
+        if 1 <= idx <= max_index and idx not in seen:
+            seen.add(idx)
+            indices.append(idx)
+    return indices
+
+
+def _parse_quote_selection(
+    selection_text: str,
+    *,
+    max_index: int,
+) -> tuple[int, str] | None:
+    """Parse a quote selection payload from model output.
+
+    Args:
+        selection_text: Raw model output for quote selection.
+        max_index: Maximum allowed chunk index.
+    Returns:
+        Tuple of (chunk_index, quote) or None when parsing fails.
+    """
+
+    if not selection_text.strip():
+        return None
+
+    payload = None
+    try:
+        payload = json.loads(selection_text)
+    except json.JSONDecodeError:
+        start = selection_text.find("{")
+        end = selection_text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            snippet = selection_text[start : end + 1]
+            try:
+                payload = json.loads(snippet)
+            except json.JSONDecodeError:
+                payload = None
+
+    if not isinstance(payload, dict):
+        return None
+
+    chunk_index = payload.get("chunk_index")
+    quote = payload.get("quote")
+    if isinstance(chunk_index, str) and chunk_index.isdigit():
+        chunk_index = int(chunk_index)
+
+    if not isinstance(chunk_index, int) or not isinstance(quote, str):
+        return None
+    if not (1 <= chunk_index <= max_index):
+        return None
+
+    quote = normalize_whitespace(quote)
+    if not quote:
+        return None
+    return chunk_index, quote
+
+
+def _quote_matches_chunk(quote: str, chunk_text: str) -> bool:
+    """Return whether a quote is a substring of the chunk text."""
+
+    normalized_quote = normalize_whitespace(quote).lower()
+    normalized_chunk = normalize_whitespace(chunk_text).lower()
+    if not normalized_quote or not normalized_chunk:
+        return False
+    return normalized_quote in normalized_chunk
+
+
+def select_quote_snippet(
+    query: str,
+    chunks: Sequence[Chunk],
+    *,
+    model: str = "gpt-4o-mini",
+) -> tuple[Chunk, str] | None:
+    """Select a verbatim quote snippet from the provided chunks.
+
+    Args:
+        query: User question text.
+        chunks: Candidate chunks for selection.
+        model: OpenAI model name for quote selection.
+    Returns:
+        Tuple of (selected chunk, quote) or None when selection fails.
+    Raises:
+        ValueError: If inputs are invalid.
+    """
+
+    if not query.strip():
+        raise ValueError("query must be non-empty")
+    validate_chunks(chunks)
+
+    template = load_quote_selection_prompt_template()
+    chunks_text = format_chunks(chunks)
+    prompt = render_quote_selection_prompt(template, chunks_text, query=query)
+
+    config = GenerationConfig(
+        model=model,
+        temperature=0.0,
+        max_output_tokens=_QUOTE_SELECTION_MAX_OUTPUT_TOKENS,
+    )
+    client = GenerationClient(config)
+    selection_text = client.generate(prompt=prompt, query="Return JSON only.")
+    selection = _parse_quote_selection(selection_text, max_index=len(chunks))
+    if selection is None:
+        return None
+
+    chunk_index, quote = selection
+    chunk = chunks[chunk_index - 1]
+    if not _quote_matches_chunk(quote, chunk.text):
+        return None
+    return chunk, quote
+
+
+def select_evidence_chunks(
+    query: str,
+    chunks: Sequence[Chunk],
+    *,
+    model: str = "gpt-4o-mini",
+    max_chunks: int = 3,
+) -> list[Chunk]:
+    """Select the most relevant evidence chunks for answering a query.
+
+    Args:
+        query: User question text.
+        chunks: Candidate chunks for selection.
+        model: OpenAI model name for selection.
+        max_chunks: Maximum number of chunks to select.
+    Returns:
+        List of selected chunks (at least one when chunks are provided).
+    Raises:
+        ValueError: If inputs are invalid.
+    """
+
+    if not query.strip():
+        raise ValueError("query must be non-empty")
+    validate_chunks(chunks)
+    if max_chunks <= 0:
+        raise ValueError("max_chunks must be > 0")
+
+    max_chunks = min(max_chunks, len(chunks))
+    template = load_selection_prompt_template()
+    chunks_text = format_chunks(chunks)
+    prompt = render_selection_prompt(
+        template,
+        chunks_text,
+        query=query,
+        max_chunks=max_chunks,
+    )
+
+    config = GenerationConfig(
+        model=model,
+        temperature=0.0,
+        max_output_tokens=_SELECTION_MAX_OUTPUT_TOKENS,
+    )
+    client = GenerationClient(config)
+    selection_text = client.generate(prompt=prompt, query="Return JSON only.")
+    indices = _parse_selection_indices(selection_text, max_index=len(chunks))
+    if not indices:
+        return [chunks[0]]
+    return [chunks[index - 1] for index in indices[:max_chunks]]
 
 
 def remap_citations_by_quote_overlap(answer: str, chunks: Sequence[Chunk]) -> str:
@@ -418,10 +938,114 @@ def _apply_citation_replacements(
     return "".join(parts)
 
 
+def map_chunk_citations(answer: str, chunks: Sequence[Chunk]) -> str:
+    """Map [chunk:N] citations to [arXiv:ID p.PAGE] citations.
+
+    Args:
+        answer: Generated answer containing chunk citations.
+        chunks: Chunks used to generate the answer.
+    Returns:
+        Answer with chunk citations replaced when possible.
+    """
+
+    if not answer.strip() or not chunks:
+        return answer
+
+    replacements: list[tuple[int, int, str]] = []
+    for match in _CHUNK_CITATION_PATTERN.finditer(answer):
+        index = int(match.group("index"))
+        if not (1 <= index <= len(chunks)):
+            continue
+        chunk = chunks[index - 1]
+        replacements.append(
+            (
+                match.start(),
+                match.end(),
+                f"[arXiv:{chunk.paper_id} p.{chunk.page_number}]",
+            )
+        )
+
+    if not replacements:
+        return answer
+    return _apply_citation_replacements(answer, replacements)
+
+
+def _needs_citation_repair(answer: str) -> bool:
+    """Check whether the answer needs citation repair."""
+
+    if not answer.strip():
+        return False
+    try:
+        citations = parse_citations(answer)
+    except ValueError:
+        return True
+    if not citations:
+        return True
+    _, quote_errors = parse_citation_quotes_with_errors(answer)
+    if quote_errors:
+        return True
+    return False
+
+
+def repair_answer_with_citations(
+    answer: str,
+    *,
+    query: str,
+    chunks: Sequence[Chunk],
+    model: str,
+    max_attempts: int = 1,
+) -> str:
+    """Repair citations in an answer using the provided chunks.
+
+    Args:
+        answer: Generated answer text.
+        query: User question text.
+        chunks: Evidence chunks to cite.
+        model: OpenAI model name for repair.
+        max_attempts: Maximum repair attempts when citations are invalid.
+    Returns:
+        Repaired answer text (may be unchanged).
+    Raises:
+        ValueError: If inputs are invalid.
+    """
+
+    if max_attempts <= 0:
+        return answer
+    if not answer.strip():
+        return answer
+    validate_chunks(chunks)
+
+    template = load_repair_prompt_template()
+    chunks_text = format_chunks(chunks)
+    prompt = render_repair_prompt(template, chunks_text, query=query, answer=answer)
+
+    config = GenerationConfig(
+        model=model,
+        temperature=0.0,
+        max_output_tokens=_REPAIR_MAX_OUTPUT_TOKENS,
+    )
+    client = GenerationClient(config)
+
+    repaired = answer
+    for _ in range(max_attempts):
+        if not _needs_citation_repair(repaired):
+            break
+        repaired = client.generate(prompt=prompt, query="Return the corrected answer.")
+        repaired = remap_citations_by_quote_overlap(repaired, chunks)
+    return repaired
+
+
 def generate_answer(
     query: str,
     chunks: list[Chunk],
     model: str = "gpt-4o-mini",
+    *,
+    select_evidence: bool = False,
+    selection_max_chunks: int = 3,
+    cite_chunk_index: bool = False,
+    quote_first: bool = False,
+    repair_citations: bool = False,
+    repair_max_attempts: int = 1,
 ) -> str:
     """Generate an answer using provided chunks with citations.
 
@@ -429,6 +1053,12 @@ def generate_answer(
         query: User question.
         chunks: Chunk payloads used as evidence.
         model: OpenAI model name for generation.
+        select_evidence: Whether to select a smaller evidence subset before answering.
+        selection_max_chunks: Maximum number of chunks to select when enabled.
+        cite_chunk_index: Whether to force citations to use [chunk:N] then map.
+        quote_first: Whether to force quote-first generation anchored to one chunk.
+        repair_citations: Whether to attempt citation repair on invalid outputs.
+        repair_max_attempts: Maximum citation repair attempts.
     Returns:
         Generated answer string.
     Raises:
@@ -440,10 +1070,43 @@ def generate_answer(
 
     validate_chunks(chunks)
 
+    working_chunks = list(chunks)
+    if select_evidence:
+        working_chunks = select_evidence_chunks(
+            query,
+            working_chunks,
+            model=model,
+            max_chunks=selection_max_chunks,
+        )
+
+    quote = None
+    if cite_chunk_index and quote_first:
+        raise ValueError("cite_chunk_index and quote_first cannot both be enabled.")
+
+    if quote_first:
+        selection = select_quote_snippet(query, working_chunks, model=model)
+        if selection is not None:
+            quote_chunk, quote = selection
+            working_chunks = [quote_chunk]
+
     config = GenerationConfig(model=model)
-    template = load_prompt_template(config.prompt_path)
-    chunks_text = format_chunks(chunks)
-    prompt = render_prompt(template, chunks_text)
+    if quote_first and quote is not None:
+        template = load_quote_first_prompt_template()
+        chunks_text = format_chunks(working_chunks)
+        prompt = render_quote_first_prompt(
+            template,
+            chunks_text,
+            query=query,
+            quote=quote,
+        )
+    elif cite_chunk_index:
+        template = load_chunk_citation_prompt_template()
+        chunks_text = format_chunks(working_chunks)
+        prompt = render_chunk_citation_prompt(template, chunks_text)
+    else:
+        template = load_prompt_template(config.prompt_path)
+        chunks_text = format_chunks(working_chunks)
+        prompt = render_prompt(template, chunks_text)
 
     LOGGER.debug("Generation input question=%s", query)
     LOGGER.debug(
@@ -451,7 +1114,7 @@ def generate_answer(
         len(chunks),
         len(chunks_text),
     )
-    for chunk in chunks:
+    for chunk in working_chunks:
         LOGGER.debug(
             "Generation chunk uid=%s paper_id=%s page=%s text_chars=%s",
             chunk.chunk_uid,
@@ -468,6 +1131,16 @@ def generate_answer(
         config.max_output_tokens,
     )
     answer = client.generate(prompt=prompt, query=query)
-    answer = remap_citations_by_quote_overlap(answer, chunks)
+    if cite_chunk_index:
+        answer = map_chunk_citations(answer, working_chunks)
+    answer = remap_citations_by_quote_overlap(answer, working_chunks)
+    if repair_citations:
+        answer = repair_answer_with_citations(
+            answer,
+            query=query,
+            chunks=working_chunks,
+            model=model,
+            max_attempts=repair_max_attempts,
+        )
     LOGGER.debug("Generation output chars=%s", len(answer))
     return answer

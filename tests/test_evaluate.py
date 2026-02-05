@@ -3,10 +3,12 @@ from pathlib import Path
 import time
 
 import arxiv_rag.evaluate as evaluate_module
+import pytest
 from arxiv_rag.evaluate import (
     CachedEmbeddingsClient,
     EvalCache,
     EvalFailureSummary,
+    GeneratedQuestion,
     EvalItemResult,
     EvalMetadata,
     EvalSet,
@@ -18,6 +20,7 @@ from arxiv_rag.evaluate import (
     compute_citation_accuracy,
     compute_mrr,
     compute_recall_at_k,
+    render_eval_prompt,
     render_report_markdown,
     run_eval,
 )
@@ -138,6 +141,106 @@ def test_render_report_markdown_includes_new_citation_fields() -> None:
     assert "Citation zero score: 12" in rendered
 
 
+def test_render_eval_prompt_requires_openings_placeholder() -> None:
+    chunk = evaluate_module.ChunkSample(
+        chunk_uid="uid-1",
+        paper_id="1234.5678",
+        page_number=2,
+        text="Example text.",
+        title=None,
+    )
+    template = "$CHUNK_TEXT $PAPER_ID $PAGE_NUMBER $CHUNK_UID $N_QUESTIONS"
+
+    with pytest.raises(ValueError, match="missing \\$OPENINGS"):
+        render_eval_prompt(
+            template,
+            chunk=chunk,
+            n_questions=1,
+            openings=["What"],
+        )
+
+
+def test_render_eval_prompt_requires_openings_when_placeholder_present() -> None:
+    chunk = evaluate_module.ChunkSample(
+        chunk_uid="uid-1",
+        paper_id="1234.5678",
+        page_number=2,
+        text="Example text.",
+        title=None,
+    )
+    template = "$CHUNK_TEXT $PAPER_ID $PAGE_NUMBER $CHUNK_UID $N_QUESTIONS $OPENINGS"
+
+    with pytest.raises(ValueError, match="requires \\$OPENINGS"):
+        render_eval_prompt(
+            template,
+            chunk=chunk,
+            n_questions=1,
+            openings=None,
+        )
+
+
+def test_generated_question_validation_rejects_excerpt_reference() -> None:
+    question = GeneratedQuestion(
+        question="What are the key capabilities in the excerpt?",
+        expected_answer="The model supports long context and multimodal reasoning.",
+        difficulty="factual",
+    )
+
+    reason = evaluate_module._validation_error_for_generated_question(
+        question,
+        chunk_text=(
+            "Gemini models support long-context reasoning and multimodal tasks."
+        ),
+    )
+
+    assert reason == "question is not standalone"
+
+
+def test_generated_question_validation_rejects_weakly_grounded_answer() -> None:
+    question = GeneratedQuestion(
+        question="Who are the authors of SpanBERT?",
+        expected_answer=(
+            "Mandar Joshi, Danqi Chen, Yinhan Liu, Daniel S. Weld, "
+            "Luke Zettlemoyer, and Omer Levy."
+        ),
+        difficulty="factual",
+    )
+
+    reason = evaluate_module._validation_error_for_generated_question(
+        question,
+        chunk_text=(
+            "Related work includes SpanBERT: Improving pre-training by "
+            "representing and predicting spans."
+        ),
+    )
+
+    assert reason == "expected answer is weakly grounded in chunk text"
+
+
+def test_generated_question_validation_accepts_grounded_standalone_question() -> None:
+    question = GeneratedQuestion(
+        question=(
+            "Which CLIP configuration achieved state-of-the-art on 21 of 27 datasets?"
+        ),
+        expected_answer=(
+            "The ViT-L/14 CLIP model with 336-by-336 images achieved "
+            "state-of-the-art on 21 of 27 datasets."
+        ),
+        difficulty="factual",
+    )
+
+    reason = evaluate_module._validation_error_for_generated_question(
+        question,
+        chunk_text=(
+            "The best-performing CLIP configuration used ViT-L/14 with "
+            "336-by-336 images and reached state-of-the-art performance in "
+            "21 of 27 datasets."
+        ),
+    )
+
+    assert reason is None
+
+
 def test_eval_cache_round_trip(tmp_path: Path) -> None:
     cache = EvalCache(tmp_path / "eval_cache.db")
     cache.set_query_embedding(
@@ -246,8 +349,8 @@ def test_run_eval_uses_generated_answer_cache(
             [],
         )
 
-    def _fake_generate_answer(query, chunks, model="gpt-4o-mini"):
-        del query, chunks, model
+    def _fake_generate_answer(query, chunks, model="gpt-4o-mini", **kwargs):
+        del query, chunks, model, kwargs
         generation_calls["count"] += 1
         return "cached answer"
 
@@ -335,8 +438,8 @@ def test_run_eval_avoids_duplicate_generation_with_concurrency(
             [],
         )
 
-    def _fake_generate_answer(query, chunks, model="gpt-4o-mini"):
-        del query, chunks, model
+    def _fake_generate_answer(query, chunks, model="gpt-4o-mini", **kwargs):
+        del query, chunks, model, kwargs
         generation_calls["count"] += 1
         time.sleep(0.05)
         return "cached answer"

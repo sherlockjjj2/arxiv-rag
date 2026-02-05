@@ -27,6 +27,37 @@ def _load_retrieve_module():
 
 def _create_fts_db(db_path: Path) -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
+    rows = [
+        (
+            1,
+            "uid-1",
+            "2312.10997",
+            "doc1",
+            3,
+            0,
+            "Dense retrieval uses embeddings for search.",
+            0,
+            0,
+            7,
+        ),
+        (
+            2,
+            "uid-2",
+            "2312.10997",
+            "doc1",
+            5,
+            0,
+            "Sparse retrieval uses BM25 ranking.",
+            0,
+            0,
+            6,
+        ),
+    ]
+    _create_fts_db_with_rows(db_path, rows)
+
+
+def _create_fts_db_with_rows(db_path: Path, rows: list[tuple]) -> None:
+    db_path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(db_path) as conn:
         conn.execute(
             """
@@ -54,32 +85,6 @@ def _create_fts_db(db_path: Path) -> None:
             );
             """
         )
-        rows = [
-            (
-                1,
-                "uid-1",
-                "2312.10997",
-                "doc1",
-                3,
-                0,
-                "Dense retrieval uses embeddings for search.",
-                0,
-                0,
-                7,
-            ),
-            (
-                2,
-                "uid-2",
-                "2312.10997",
-                "doc1",
-                5,
-                0,
-                "Sparse retrieval uses BM25 ranking.",
-                0,
-                0,
-                6,
-            ),
-        ]
         conn.executemany(
             """
             INSERT INTO chunks (
@@ -99,7 +104,7 @@ def _create_fts_db(db_path: Path) -> None:
         )
         conn.executemany(
             "INSERT INTO chunks_fts(rowid, text) VALUES (?, ?)",
-            [(1, rows[0][6]), (2, rows[1][6])],
+            [(row[0], row[6]) for row in rows],
         )
         conn.commit()
 
@@ -118,6 +123,64 @@ def test_search_fts_returns_results(tmp_path: Path) -> None:
     assert results
     assert results[0].paper_id == "2312.10997"
     assert results[0].page_number == 3
+
+
+def test_search_fts_relaxes_query_when_strict_query_empty(tmp_path: Path) -> None:
+    db_path = tmp_path / "arxiv_rag.db"
+    rows = [
+        (
+            1,
+            "uid-3",
+            "2401.00001",
+            "doc2",
+            1,
+            0,
+            "Transformer laws describe model behavior at scale.",
+            0,
+            0,
+            8,
+        ),
+    ]
+    _create_fts_db_with_rows(db_path, rows)
+    retrieve = _load_retrieve_module()
+
+    results = retrieve.search_fts(
+        "transformer scaling laws",
+        top_k=5,
+        db_path=db_path,
+    )
+
+    assert results
+    assert results[0].chunk_uid == "uid-3"
+
+
+def test_rerank_results_for_generation_promotes_overlap() -> None:
+    retrieve = _load_retrieve_module()
+    results = [
+        retrieve.ChunkResult(
+            chunk_uid="uid-1",
+            chunk_id=1,
+            paper_id="2312.10997",
+            page_number=5,
+            text="Sparse retrieval uses BM25 ranking.",
+            score=0.1,
+        ),
+        retrieve.ChunkResult(
+            chunk_uid="uid-2",
+            chunk_id=2,
+            paper_id="2312.10997",
+            page_number=3,
+            text="Dense retrieval uses embeddings for search.",
+            score=0.2,
+        ),
+    ]
+
+    reranked = retrieve.rerank_results_for_generation(
+        "dense retrieval embeddings",
+        results,
+    )
+
+    assert reranked[0].chunk_uid == "uid-2"
 
 
 def test_format_snippet_truncates() -> None:
