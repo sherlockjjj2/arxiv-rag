@@ -12,7 +12,11 @@ from tiktoken import Encoding, get_encoding
 
 from arxiv_rag.chroma_client import ChromaConfig, ChromaStore
 from arxiv_rag.db import normalize_embedding
-from arxiv_rag.embeddings_client import EmbeddingsClient, EmbeddingsConfig
+from arxiv_rag.embeddings_client import (
+    EmbeddingsClient,
+    EmbeddingsClientLike,
+    EmbeddingsConfig,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -165,7 +169,7 @@ def index_chunks(
     batch_size: int | None = None,
     force_delete: bool = False,
     chroma_store: ChromaStore | None = None,
-    embeddings_client: EmbeddingsClient | None = None,
+    embeddings_client: EmbeddingsClientLike | None = None,
 ) -> int:
     """Index chunk embeddings into Chroma.
 

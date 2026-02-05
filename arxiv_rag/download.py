@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 
 import arxiv
-import requests
+import requests  # type: ignore[import-untyped]
 
 from arxiv_rag.arxiv_ids import (
     base_id_from_versioned,

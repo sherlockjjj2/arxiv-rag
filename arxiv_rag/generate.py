@@ -44,10 +44,41 @@ _DEFAULT_QUOTE_FIRST_PROMPT_PATH = (
     Path(__file__).resolve().parent / "prompts" / "generate_quote_first.txt"
 )
 _MIN_QUOTE_OVERLAP = 0.6
+_MIN_SNIPPET_OVERLAP = 0.25
 _SELECTION_MAX_OUTPUT_TOKENS = 300
 _QUOTE_SELECTION_MAX_OUTPUT_TOKENS = 300
 _REPAIR_MAX_OUTPUT_TOKENS = 1200
 _CHUNK_CITATION_PATTERN = re.compile(r"\[chunk:(?P<index>\d+)\]", re.IGNORECASE)
+_SNIPPET_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "by",
+        "for",
+        "from",
+        "has",
+        "in",
+        "is",
+        "it",
+        "its",
+        "of",
+        "on",
+        "or",
+        "that",
+        "the",
+        "their",
+        "this",
+        "to",
+        "was",
+        "were",
+        "with",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -194,14 +225,17 @@ def load_prompt_template(path: Path | None = None) -> str:
         ValueError: If the prompt template is empty.
     """
 
+    template: str
     if path is not None:
         prompt_path = path
         if not prompt_path.exists():
             raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
         template = prompt_path.read_text(encoding="utf-8")
     else:
-        template = _load_packaged_prompt_template()
-        if template is None:
+        packaged_template = _load_packaged_prompt_template()
+        if packaged_template is not None:
+            template = packaged_template
+        else:
             prompt_path = _DEFAULT_PROMPT_PATH
             if not prompt_path.exists():
                 raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
@@ -224,14 +258,17 @@ def load_chunk_citation_prompt_template(path: Path | None = None) -> str:
         ValueError: If the prompt template is empty.
     """
 
+    template: str
     if path is not None:
         prompt_path = path
         if not prompt_path.exists():
             raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
         template = prompt_path.read_text(encoding="utf-8")
     else:
-        template = _load_packaged_prompt("generate_with_chunk_citations.txt")
-        if template is None:
+        packaged_template = _load_packaged_prompt("generate_with_chunk_citations.txt")
+        if packaged_template is not None:
+            template = packaged_template
+        else:
             prompt_path = _DEFAULT_CHUNK_CITATION_PROMPT_PATH
             if not prompt_path.exists():
                 raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
@@ -291,14 +328,17 @@ def load_selection_prompt_template(path: Path | None = None) -> str:
         ValueError: If the prompt template is empty.
     """
 
+    template: str
     if path is not None:
         prompt_path = path
         if not prompt_path.exists():
             raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
         template = prompt_path.read_text(encoding="utf-8")
     else:
-        template = _load_packaged_prompt("select_evidence.txt")
-        if template is None:
+        packaged_template = _load_packaged_prompt("select_evidence.txt")
+        if packaged_template is not None:
+            template = packaged_template
+        else:
             prompt_path = _DEFAULT_SELECTION_PROMPT_PATH
             if not prompt_path.exists():
                 raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
@@ -321,14 +361,17 @@ def load_quote_selection_prompt_template(path: Path | None = None) -> str:
         ValueError: If the prompt template is empty.
     """
 
+    template: str
     if path is not None:
         prompt_path = path
         if not prompt_path.exists():
             raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
         template = prompt_path.read_text(encoding="utf-8")
     else:
-        template = _load_packaged_prompt("select_quote.txt")
-        if template is None:
+        packaged_template = _load_packaged_prompt("select_quote.txt")
+        if packaged_template is not None:
+            template = packaged_template
+        else:
             prompt_path = _DEFAULT_QUOTE_SELECTION_PROMPT_PATH
             if not prompt_path.exists():
                 raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
@@ -351,14 +394,17 @@ def load_quote_first_prompt_template(path: Path | None = None) -> str:
         ValueError: If the prompt template is empty.
     """
 
+    template: str
     if path is not None:
         prompt_path = path
         if not prompt_path.exists():
             raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
         template = prompt_path.read_text(encoding="utf-8")
     else:
-        template = _load_packaged_prompt("generate_quote_first.txt")
-        if template is None:
+        packaged_template = _load_packaged_prompt("generate_quote_first.txt")
+        if packaged_template is not None:
+            template = packaged_template
+        else:
             prompt_path = _DEFAULT_QUOTE_FIRST_PROMPT_PATH
             if not prompt_path.exists():
                 raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
@@ -381,14 +427,17 @@ def load_repair_prompt_template(path: Path | None = None) -> str:
         ValueError: If the prompt template is empty.
     """
 
+    template: str
     if path is not None:
         prompt_path = path
         if not prompt_path.exists():
             raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
         template = prompt_path.read_text(encoding="utf-8")
     else:
-        template = _load_packaged_prompt("repair_citations.txt")
-        if template is None:
+        packaged_template = _load_packaged_prompt("repair_citations.txt")
+        if packaged_template is not None:
+            template = packaged_template
+        else:
             prompt_path = _DEFAULT_REPAIR_PROMPT_PATH
             if not prompt_path.exists():
                 raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
@@ -760,6 +809,7 @@ def select_evidence_chunks(
         max_chunks: Maximum number of chunks to select.
     Returns:
         List of selected chunks (at least one when chunks are provided).
+        Always includes the top-ranked chunk as a guardrail, subject to max_chunks.
     Raises:
         ValueError: If inputs are invalid.
     """
@@ -790,7 +840,13 @@ def select_evidence_chunks(
     indices = _parse_selection_indices(selection_text, max_index=len(chunks))
     if not indices:
         return [chunks[0]]
-    return [chunks[index - 1] for index in indices[:max_chunks]]
+    ordered_indices: list[int] = [1]
+    for index in indices:
+        if index not in ordered_indices:
+            ordered_indices.append(index)
+        if len(ordered_indices) >= max_chunks:
+            break
+    return [chunks[index - 1] for index in ordered_indices[:max_chunks]]
 
 
 def remap_citations_by_quote_overlap(answer: str, chunks: Sequence[Chunk]) -> str:
@@ -803,7 +859,7 @@ def remap_citations_by_quote_overlap(answer: str, chunks: Sequence[Chunk]) -> st
         Answer text with citation targets updated when a better quote-supported
         chunk match is found.
     Edge cases:
-        Returns the original answer when citations or quotes cannot be parsed.
+        Returns the original answer when citations cannot be parsed.
     """
 
     if not answer.strip() or not chunks:
@@ -824,10 +880,15 @@ def remap_citations_by_quote_overlap(answer: str, chunks: Sequence[Chunk]) -> st
     replacements: list[tuple[int, int, str]] = []
     for citation, match in zip(citations, matches, strict=False):
         quote = quote_map.get(citation.citation_id)
-        if quote is None:
-            continue
-
-        best_chunk = _select_best_chunk_for_quote(quote, chunks)
+        if quote is not None:
+            best_chunk = _select_best_chunk_for_quote(quote, chunks)
+        else:
+            snippet = _extract_sentence_snippet(
+                answer,
+                start=match.start(),
+                end=match.end(),
+            )
+            best_chunk = _select_best_chunk_for_snippet(snippet, chunks)
         if best_chunk is None:
             continue
         if (
@@ -882,6 +943,78 @@ def _select_best_chunk_for_quote(quote: str, chunks: Sequence[Chunk]) -> Chunk |
     return best_chunk
 
 
+def _select_best_chunk_for_snippet(
+    snippet: str | None,
+    chunks: Sequence[Chunk],
+) -> Chunk | None:
+    """Choose the highest-overlap chunk for a sentence snippet.
+
+    Args:
+        snippet: Sentence fragment near a citation.
+        chunks: Retrieved chunks in rank order.
+    Returns:
+        Best matching chunk, or None when no chunk is a reasonable match.
+    """
+
+    if snippet is None:
+        return None
+    normalized = normalize_whitespace(snippet).lower()
+    tokens = _tokenize_for_snippet(normalized)
+    if len(tokens) < 3:
+        return None
+
+    best_chunk: Chunk | None = None
+    best_score = 0.0
+    for chunk in chunks:
+        score = _score_quote_overlap(
+            normalized_quote=normalized,
+            quote_tokens=tokens,
+            chunk_text=chunk.text,
+        )
+        if score > best_score:
+            best_score = score
+            best_chunk = chunk
+
+    if best_chunk is None or best_score < _MIN_SNIPPET_OVERLAP:
+        return None
+    return best_chunk
+
+
+def _extract_sentence_snippet(answer: str, *, start: int, end: int) -> str | None:
+    """Extract the sentence surrounding a citation span.
+
+    Args:
+        answer: Full answer text.
+        start: Start index of the citation match.
+        end: End index of the citation match.
+    Returns:
+        Sentence snippet with citation markers removed, or None when unavailable.
+    """
+
+    if not answer:
+        return None
+
+    boundaries = ".!?\n"
+    before = [answer.rfind(ch, 0, start) for ch in boundaries]
+    start_index = max(before)
+    if start_index == -1:
+        start_index = 0
+    else:
+        start_index += 1
+
+    after_candidates = [answer.find(ch, end) for ch in boundaries]
+    after_candidates = [idx for idx in after_candidates if idx != -1]
+    end_index = min(after_candidates) if after_candidates else len(answer)
+
+    snippet = answer[start_index:end_index]
+    snippet = CITATION_PATTERN.sub("", snippet)
+    snippet = re.sub(r'\*\"quote\"\\*', "", snippet, flags=re.IGNORECASE)
+    snippet = normalize_whitespace(snippet).strip()
+    if not snippet:
+        return None
+    return snippet
+
+
 def _score_quote_overlap(
     *,
     normalized_quote: str,
@@ -915,6 +1048,17 @@ def _tokenize_for_overlap(text: str) -> list[str]:
     """Tokenize text for lexical overlap checks."""
 
     return [token for token in re.findall(r"[a-z0-9]+", text) if len(token) >= 2]
+
+
+def _tokenize_for_snippet(text: str) -> list[str]:
+    """Tokenize text for snippet overlap checks, excluding stop words."""
+
+    tokens = re.findall(r"[a-z0-9]+", text)
+    return [
+        token
+        for token in tokens
+        if len(token) >= 3 and token not in _SNIPPET_STOPWORDS
+    ]
 
 
 def _apply_citation_replacements(

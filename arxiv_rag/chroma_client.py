@@ -9,7 +9,7 @@ from typing import Literal, Sequence, TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only imports
     from chromadb.api import ClientAPI
-    from chromadb.api.models import Collection
+    from chromadb.api.models.Collection import Collection
 
 LOGGER = logging.getLogger(__name__)
 

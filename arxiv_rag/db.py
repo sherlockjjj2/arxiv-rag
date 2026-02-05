@@ -160,7 +160,10 @@ def insert_query_log(db_path: Path, entry: QueryLogEntry) -> int:
             ),
         )
         conn.commit()
-        return int(cursor.lastrowid)
+        last_row_id = cursor.lastrowid
+        if last_row_id is None:
+            raise sqlite3.Error("Insert into query_log did not return a rowid.")
+        return int(last_row_id)
 
 
 def ensure_papers_schema(
